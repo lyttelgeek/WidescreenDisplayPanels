@@ -22,7 +22,7 @@ Adds 2x1, 3x1, and 4x1 widescreen variants of the vanilla display panel, designe
   - Signal-based conditions
   - Custom messages and icons
   - Optional alt-mode visibility
-  - Optional chart tag display
+  - Optional chart tag display (one icon per panel)
 
 - Copy and paste segment configurations between panels
 
@@ -37,8 +37,8 @@ Each panel is divided into horizontal segments depending on its width. Each segm
 - Evaluates rules in order
 - Displays the first matching rule
 - Can show an icon and/or message
-- Can optionally display in alt-mode
-- Can optionally create a chart tag
+- Can optionally display always in alt-mode
+- Can optionally create a chart tag from one segment
 
 ### Wiring
 
