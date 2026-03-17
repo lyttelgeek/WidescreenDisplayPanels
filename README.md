@@ -1,5 +1,7 @@
 # Widescreen Display Panels
 
+![Panels](thumbnail.png)
+
 Adds 2x1, 3x1, and 4x1 widescreen variants of the vanilla display panel, designed for cleaner dashboards and improved readability in circuit network setups.
 
 ## Features
