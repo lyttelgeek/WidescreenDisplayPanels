@@ -1,0 +1,28 @@
+# Changelog
+
+## 1.0.0 - Initial Stable Release
+
+### Features
+- Initial release
+- Added 2x1, 3x1, and 4x1 widescreen display panels
+- Segment-based display system
+- Multi-rule support per segment
+- Icon and message rendering
+- Alt-mode visibility option
+- Chart tag support
+
+### Integration
+- Display Signal Counts (DSC) compatibility
+
+### UI
+- Custom configuration GUI
+- Segment tabs and rule editor
+- Message editor with icon insertion
+
+### Quality of Life
+- Segment copy and paste support
+
+### Technical
+- Persistent GUI state across save/load
+- Improved message backer sizing for rich text
+- Stable runtime behaviour and rendering
