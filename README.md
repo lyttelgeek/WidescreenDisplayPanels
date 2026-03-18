@@ -40,14 +40,14 @@ Each panel is divided into horizontal segments depending on its width. Each segm
 - Can optionally display always in alt-mode
 - Can optionally create a chart tag from one segment
 
-### Wiring
+## Wiring
 
 - The **left side** of the panel functions as the circuit input
 - The **right side** uses an invisible connector that outputs the merged signals
 
 This allows panels to act as both display and passthrough components in circuit networks, and enables clean panel-chaining.
 
-### Copy and Paste
+## Copy and Paste
 
 Segments can be copied and pasted:
 
