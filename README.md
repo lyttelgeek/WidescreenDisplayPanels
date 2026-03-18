@@ -65,7 +65,8 @@ All widescreen panels are unlocked alongside the vanilla display panel via circu
 
 ## Compatibility
 
-- Factorio 2.x
+- Requires **Factorio 2.0+**
+- Space Age compatible (not required)
 - Compatible with most mods that interact with display panels or circuit networks
 
 ## Known limitations
