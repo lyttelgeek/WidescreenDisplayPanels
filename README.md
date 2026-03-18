@@ -78,3 +78,6 @@ All widescreen panels are unlocked alongside the vanilla display panel via circu
 - Tallscreen panel variants
 - Additional quality-of-life improvements
 
+## Current Version
+
+[v1.0.0 Initial Stable Release](https://github.com/lyttelgeek/WidescreenDisplayPanels/releases/tag/1.0.0-Initial_Release)
