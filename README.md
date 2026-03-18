@@ -56,7 +56,7 @@ Segments can be copied and pasted:
 
 ## Unlocking
 
-All widescreen panels are unlocked alongside the vanilla display panel via circuit network research.
+All widescreen panels are unlocked alongside the vanilla display panel via circuit network research. They use the vanilla recipe multiplied by the panel's width.
 
 ## Notes
 
