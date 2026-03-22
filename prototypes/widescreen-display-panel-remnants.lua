@@ -12,21 +12,42 @@ local REMNANTS = {
     remnant = { filename = "2x1-remnants.png", w = 137, h = 76 },
     shadow  = { filename = "2x1-shadow.png",   w = 128, h = 42 },
     remnant_shift = { x = 0, y = -2 },
-    shadow_offset = { x = 6, y = 8 }, -- LOCKED
+    shadow_offset = { x = 6, y = 8 },
   },
   {
     entity_name = "widescreen-display-panel-3x1",
     remnant = { filename = "3x1-remnants.png", w = 172, h = 83 },
     shadow  = { filename = "3x1-shadow.png",   w = 171, h = 42 },
     remnant_shift = { x = 0, y = 0 },
-    shadow_offset = { x = 8, y = 5 }, -- LOCKED
+    shadow_offset = { x = 8, y = 5 },
   },
   {
     entity_name = "widescreen-display-panel-4x1",
     remnant = { filename = "4x1-remnants.png", w = 205, h = 80 },
     shadow  = { filename = "4x1-shadow.png",   w = 208, h = 42 },
     remnant_shift = { x = 0, y = 0 },
-    shadow_offset = { x = 8, y = 6 }, -- LOCKED
+    shadow_offset = { x = 8, y = 6 },
+  },
+  {
+    entity_name = "widescreen-display-panel-1x2",
+    remnant = { filename = "1x2-remnants.png", w = 85, h = 159 },
+    shadow  = { filename = "1x2-remnants-shadow.png",   w = 86, h = 160 },
+    remnant_shift = { x = 0, y = 0 },
+    shadow_offset = { x = 2, y = 0 },
+  },
+  {
+    entity_name = "widescreen-display-panel-1x3",
+    remnant = { filename = "1x3-remnants.png", w = 84, h = 199 },
+    shadow  = { filename = "1x3-remnants-shadow.png",   w = 89, h = 199 },
+    remnant_shift = { x = 0, y = 0 },
+    shadow_offset = { x = 2, y = 0 },
+  },
+  {
+    entity_name = "widescreen-display-panel-1x4",
+    remnant = { filename = "1x4-remnants.png", w = 84, h = 270 },
+    shadow  = { filename = "1x4-remnants-shadow.png",   w = 87, h = 270 },
+    remnant_shift = { x = 0, y = 0 },
+    shadow_offset = { x = 2, y = 0 },
   },
 }
 

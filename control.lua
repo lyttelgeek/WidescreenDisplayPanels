@@ -1,7 +1,10 @@
 local PANEL_SPECS = {
-  ["widescreen-display-panel-2x1"] = { tiles_w = 2, segments = 2, port_suffix = "2x1", title = "Widescreen Display Panel 2x1" },
-  ["widescreen-display-panel-3x1"] = { tiles_w = 3, segments = 3, port_suffix = "3x1", title = "Widescreen Display Panel 3x1" },
-  ["widescreen-display-panel-4x1"] = { tiles_w = 4, segments = 4, port_suffix = "4x1", title = "Widescreen Display Panel 4x1" },
+  ["widescreen-display-panel-2x1"] = { tiles_w = 2, tiles_h = 1, segments = 2, port_suffix = "2x1", port_side = "right",  title = "Widescreen Display Panel 2x1" },
+  ["widescreen-display-panel-3x1"] = { tiles_w = 3, tiles_h = 1, segments = 3, port_suffix = "3x1", port_side = "right",  title = "Widescreen Display Panel 3x1" },
+  ["widescreen-display-panel-4x1"] = { tiles_w = 4, tiles_h = 1, segments = 4, port_suffix = "4x1", port_side = "right",  title = "Widescreen Display Panel 4x1" },
+  ["widescreen-display-panel-1x2"] = { tiles_w = 1, tiles_h = 2, segments = 2, port_suffix = "1x2", port_side = "bottom", title = "Widescreen Display Panel 1x2" },
+  ["widescreen-display-panel-1x3"] = { tiles_w = 1, tiles_h = 3, segments = 3, port_suffix = "1x3", port_side = "bottom", title = "Widescreen Display Panel 1x3" },
+  ["widescreen-display-panel-1x4"] = { tiles_w = 1, tiles_h = 4, segments = 4, port_suffix = "1x4", port_side = "bottom", title = "Widescreen Display Panel 1x4" },
 }
 
 local COMPARATORS = {
@@ -35,6 +38,23 @@ local TEXT_Y_OFFSET = -0.840625
 local ICON_SCALE = 0.51
 local TEXT_SCALE = 0.76
 
+local SEGMENT_Y_OFFSETS_TALL = {
+  [2] = { -0.40,  0.46 },
+  [3] = { -0.75,  0.00,  0.75 },
+  [4] = { -1.34, -0.46,  0.46,  1.34 },
+}
+
+local PANEL_TOP_BIAS_TALL = {
+  [2] = -0.10 - (5 / 32),
+  [3] = -0.18 - (7.5 / 32),
+  [4] = -0.26 - (3 / 32),
+}
+
+local ICON_X_OFFSET_TALL = -1 / 32
+local TEXT_X_OFFSET_TALL = -1 / 32
+local TEXT_Y_OFFSET_TALL = -0.38
+local BACKER_Y_OFFSET_TALL = TEXT_Y_OFFSET_TALL + 0.01
+
 local BACKER_ENABLED = true
 local BACKER_COLOR = { 0, 0, 0, 0.35 }
 local BACKER_MIN_WIDTH = 0.22
@@ -48,20 +68,33 @@ local BASELINE_PX       = 7
 local MAIN_SHIFT_PX     = 0
 local MAIN_SHIFT_PY     = -3
 local PORT_X_OUTSET_PX  = 12
+local PORT_BOTTOM_OUTSET_PX = 20
+local TALL_PORT_X_SHIFT_PX = -6
 
 local DEBUG = false
 local function dlog(msg) if DEBUG then log("WDP: " .. msg) end end
 local function px_to_tiles(px) return px / 32 end
 
-local function port_right_name_for(panel_name)
+local function is_tall_panel(panel)
+  local spec = panel and PANEL_SPECS[panel.name]
+  return spec and spec.port_side == "bottom"
+end
+
+local function port_name_for(panel_name)
   local spec = PANEL_SPECS[panel_name]
   if not spec then return nil end
+
+  if spec.port_side == "bottom" then
+    return "widescreen-display-panel-connector-bottom-" .. spec.port_suffix
+  end
+
   return "widescreen-display-panel-connector-right-" .. spec.port_suffix
 end
 
 local PORT_NAME_SET = {}
 for _, spec in pairs(PANEL_SPECS) do
   PORT_NAME_SET["widescreen-display-panel-connector-right-" .. spec.port_suffix] = true
+  PORT_NAME_SET["widescreen-display-panel-connector-bottom-" .. spec.port_suffix] = true
 end
 
 --[[
@@ -127,10 +160,35 @@ local function normalize_signal_type_internal(t)
   return t
 end
 
+local function infer_signal_type_from_name(name)
+  if not name then return nil end
+
+  if prototypes and prototypes.item and prototypes.item[name] then
+    return "item"
+  end
+
+  if prototypes and prototypes.fluid and prototypes.fluid[name] then
+    return "fluid"
+  end
+
+  if prototypes and prototypes.virtual_signal and prototypes.virtual_signal[name] then
+    return "virtual"
+  end
+
+  return nil
+end
+
 local function normalize_signal(sig)
-  if not sig then return nil end
-  local t = normalize_signal_type_internal(sig.type)
-  if not sig.name then return nil end
+  if not sig or not sig.name then return nil end
+
+  local t = sig.type
+  if not t then
+    t = infer_signal_type_from_name(sig.name)
+  end
+
+  t = normalize_signal_type_internal(t)
+  if not t then return nil end
+
   return {
     type = t,
     name = sig.name,
@@ -408,11 +466,22 @@ local function clear_panel_chart_tag(panel_unit)
   global.wdp.chart_tag_hash[panel_unit] = nil
 end
 
-local function expected_right_port_position(panel)
+local function expected_port_position(panel)
   local spec = PANEL_SPECS[panel.name]
   if not spec then return nil end
 
   local p = panel.position
+
+  if spec.port_side == "bottom" then
+    local half_height_px = (spec.tiles_h * 32) / 2
+    local end_y_px = (half_height_px - CAP_INSET_PX) + PORT_BOTTOM_OUTSET_PX
+
+    return {
+      x = p.x + px_to_tiles(MAIN_SHIFT_PX + TALL_PORT_X_SHIFT_PX),
+      y = p.y + px_to_tiles(end_y_px + MAIN_SHIFT_PY),
+    }
+  end
+
   local half_width_px = (spec.tiles_w * 32) / 2
   local end_x_px = (half_width_px - CAP_INSET_PX) + PORT_X_OUTSET_PX
 
@@ -425,12 +494,12 @@ local function expected_right_port_position(panel)
   }
 end
 
-local function destroy_right_ports_at_expected_pos(panel)
+local function destroy_ports_at_expected_pos(panel)
   if not (panel and panel.valid) then return end
 
-  local rname = port_right_name_for(panel.name)
-  local pos = expected_right_port_position(panel)
-  if not rname or not pos then return end
+  local port_name = port_name_for(panel.name)
+  local pos = expected_port_position(panel)
+  if not port_name or not pos then return end
 
   local eps_x = 0.30
   local eps_y = 0.30
@@ -440,7 +509,7 @@ local function destroy_right_ports_at_expected_pos(panel)
       { pos.x - eps_x, pos.y - eps_y },
       { pos.x + eps_x, pos.y + eps_y },
     },
-    name = rname,
+    name = port_name,
     force = panel.force,
   }
 
@@ -450,22 +519,31 @@ local function destroy_right_ports_at_expected_pos(panel)
   end
 end
 
-local function destroy_right_ports_for_removed_panel(panel)
+local function destroy_ports_for_removed_panel(panel)
   if not (panel and panel.valid) then return end
 
   local spec = PANEL_SPECS[panel.name]
-  local rname = port_right_name_for(panel.name)
-  if not spec or not rname then return end
+  local pname = port_name_for(panel.name)
+  if not spec or not pname then return end
 
-  local half_w = spec.tiles_w / 2
-  local area = {
-    { panel.position.x,                 panel.position.y - 1.5 },
-    { panel.position.x + half_w + 1.5, panel.position.y + 1.5 },
-  }
+  local area
+  if spec.port_side == "bottom" then
+    local half_h = spec.tiles_h / 2
+    area = {
+      { panel.position.x - 1.5, panel.position.y },
+      { panel.position.x + 1.5, panel.position.y + half_h + 1.5 },
+    }
+  else
+    local half_w = spec.tiles_w / 2
+    area = {
+      { panel.position.x,                 panel.position.y - 1.5 },
+      { panel.position.x + half_w + 1.5, panel.position.y + 1.5 },
+    }
+  end
 
   local found = panel.surface.find_entities_filtered{
     area = area,
-    name = rname,
+    name = pname,
     force = panel.force,
   }
 
@@ -492,7 +570,7 @@ local function detach_ports_by_unit(unit_number, keep_settings)
 
   local ports = global.wdp.ports[unit_number]
   if ports then
-    destroy_if_valid(ports.right)
+    destroy_if_valid(ports.output)
     global.wdp.ports[unit_number] = nil
   end
 
@@ -531,26 +609,26 @@ local function make_ports_for_panel(panel)
   local spec = PANEL_SPECS[panel.name]
   if not spec then return nil end
 
-  local rname = port_right_name_for(panel.name)
-  if not rname then return nil end
+  local pname = port_name_for(panel.name)
+  if not pname then return nil end
 
-  local pos = expected_right_port_position(panel)
+  local pos = expected_port_position(panel)
   if not pos then return nil end
 
-  local right = panel.surface.create_entity{
-    name = rname,
+  local output = panel.surface.create_entity{
+    name = pname,
     position = pos,
     force = panel.force,
     create_build_effect_smoke = false,
     raise_built = false,
   }
 
-  if not (right and right.valid) then
-    destroy_if_valid(right)
+  if not (output and output.valid) then
+    destroy_if_valid(output)
     return nil
   end
 
-  return { right = right }
+  return { output = output }
 end
 
 local function attach_ports(panel)
@@ -562,11 +640,11 @@ local function attach_ports(panel)
   local old_ports = global.wdp.ports[unit]
 
   if old_ports then
-    destroy_if_valid(old_ports.right)
+    destroy_if_valid(old_ports.output)
     global.wdp.ports[unit] = nil
   end
 
-  destroy_right_ports_at_expected_pos(panel)
+  destroy_ports_at_expected_pos(panel)
 
   local ports = make_ports_for_panel(panel)
 
@@ -595,7 +673,7 @@ local function ensure_panel_runtime(panel)
   ensure_panel_segment_data(panel)
 
   local ports = global.wdp.ports[unit]
-  if not ports or not ports.right or not ports.right.valid then
+  if not ports or not ports.output or not ports.output.valid then
     attach_ports(panel)
     return true
   end
@@ -657,8 +735,17 @@ local function hash_signal_table(t)
 end
 
 local function signal_key_from_signal(sig)
-  if not sig or not sig.name or not sig.type then return nil end
-  return normalize_signal_type_internal(sig.type) .. ":" .. sig.name .. ":" .. (sig.quality or "normal")
+  if not sig or not sig.name then return nil end
+
+  local t = sig.type
+  if not t then
+    t = infer_signal_type_from_name(sig.name)
+  end
+
+  t = normalize_signal_type_internal(t)
+  if not t then return nil end
+
+  return t .. ":" .. sig.name .. ":" .. (sig.quality or "normal")
 end
 
 local function signal_value_from_table(merged_tbl, sig)
@@ -677,32 +764,53 @@ local function comparator_pass(lhs, op, rhs)
   return false
 end
 
-local function sprite_path_from_signal(sig)
-  if not sig or not sig.type or not sig.name then return nil end
-  local t = normalize_signal_type_internal(sig.type)
-  if t == "virtual" then
-    t = "virtual-signal"
+local function sprite_namespace_for_signal(sig)
+  if not sig or not sig.name then return nil end
+
+  local t = sig.type
+  if not t then
+    t = infer_signal_type_from_name(sig.name)
   end
-  return t .. "/" .. sig.name
+
+  t = normalize_signal_type_internal(t)
+
+  if t == "virtual" or t == "virtual-signal" then
+    return "virtual-signal"
+  elseif t == "item" then
+    return "item"
+  elseif t == "fluid" then
+    return "fluid"
+  elseif t == "recipe" then
+    return "recipe"
+  elseif t == "entity" then
+    return "entity"
+  elseif t == "space-location" then
+    return "space-location"
+  elseif t == "asteroid-chunk" then
+    return "asteroid-chunk"
+  elseif t == "quality" then
+    return "quality"
+  end
+
+  return nil
+end
+
+local function sprite_path_from_signal(sig)
+  if sig then
+    log("WDP sprite_path_from_signal type=" .. tostring(sig.type) .. " name=" .. tostring(sig.name))
+  end
+  local ns = sprite_namespace_for_signal(sig)
+  if not ns then
+    log("WDP sprite namespace nil for type=" .. tostring(sig and sig.type))
+    return nil
+  end
+  return ns .. "/" .. sig.name
 end
 
 local function rich_text_token_for_signal(sig)
-  if not sig or not sig.name or not sig.type then return nil end
-
-  local t = normalize_signal_type_internal(sig.type)
-  local path = nil
-
-  if t == "virtual" then
-    path = "virtual-signal/" .. sig.name
-  elseif t == "item" then
-    path = "item/" .. sig.name
-  elseif t == "fluid" then
-    path = "fluid/" .. sig.name
-  else
-    return nil
-  end
-
-  return "[img=" .. path .. "]"
+  local ns = sprite_namespace_for_signal(sig)
+  if not ns then return nil end
+  return "[img=" .. ns .. "/" .. sig.name .. "]"
 end
 
 local function rhs_value_from_rule(rule, merged_tbl)
@@ -1051,7 +1159,7 @@ local function message_preview_text(message)
   msg = string.gsub(msg, string.char(10), " ")
 
   if msg == "" then
-    return "(no message)"
+    return "(No label)"
   end
 
   local max_visible = 24
@@ -1135,14 +1243,35 @@ local function render_segment(panel, panel_unit, seg_idx, seg_cfg, merged_tbl, s
     return
   end
 
-  local offsets = segment_offsets_for_count(segment_count)
-  local adjusts = segment_render_adjust_for_count(segment_count)
-  if not offsets or not offsets[seg_idx] then
-    hash_bucket[seg_idx] = new_hash
-    return
+  local render_x, icon_y, text_y, backer_y
+
+  if is_tall_panel(panel) then
+    local y_offsets = SEGMENT_Y_OFFSETS_TALL[segment_count]
+    if not y_offsets or not y_offsets[seg_idx] then
+      hash_bucket[seg_idx] = new_hash
+      return
+    end
+
+    local bias = PANEL_TOP_BIAS_TALL[segment_count] or 0
+
+    render_x = ICON_X_OFFSET_TALL
+    icon_y = y_offsets[seg_idx] + bias
+    text_y = y_offsets[seg_idx] + TEXT_Y_OFFSET_TALL + bias
+    backer_y = y_offsets[seg_idx] + BACKER_Y_OFFSET_TALL + bias
+  else
+    local offsets = segment_offsets_for_count(segment_count)
+    local adjusts = segment_render_adjust_for_count(segment_count)
+    if not offsets or not offsets[seg_idx] then
+      hash_bucket[seg_idx] = new_hash
+      return
+    end
+
+    render_x = offsets[seg_idx] + ((adjusts and adjusts[seg_idx]) or 0)
+    icon_y = ICON_Y_OFFSET
+    text_y = TEXT_Y_OFFSET
+    backer_y = BACKER_Y_OFFSET
   end
 
-  local render_x = offsets[seg_idx] + ((adjusts and adjusts[seg_idx]) or 0)
   local rule = match.rule
   local sprite = sprite_path_from_signal(rule.icon_signal)
   local message = rule.message or ""
@@ -1150,12 +1279,11 @@ local function render_segment(panel, panel_unit, seg_idx, seg_cfg, merged_tbl, s
 
   local seg_bucket = {}
 
-  -- Display icon is always shown when the rule condition passes.
   if sprite then
     local obj = rendering.draw_sprite{
       sprite = sprite,
       surface = panel.surface,
-      target = { entity = panel, offset = { render_x, ICON_Y_OFFSET } },
+      target = { entity = panel, offset = { render_x, icon_y } },
       x_scale = ICON_SCALE,
       y_scale = ICON_SCALE,
       forces = panel.force,
@@ -1163,7 +1291,6 @@ local function render_segment(panel, panel_unit, seg_idx, seg_cfg, merged_tbl, s
     seg_bucket.icon = obj and obj.id or nil
   end
 
-  -- Message backer/text obey the checkbox.
   if always_visible_message and BACKER_ENABLED and message ~= "" then
     local width = estimated_backer_width_for_message(message)
     local half_width = width / 2
@@ -1171,8 +1298,8 @@ local function render_segment(panel, panel_unit, seg_idx, seg_cfg, merged_tbl, s
       color = BACKER_COLOR,
       filled = true,
       surface = panel.surface,
-      left_top = { entity = panel, offset = { render_x - half_width, BACKER_Y_OFFSET - BACKER_HALF_HEIGHT } },
-      right_bottom = { entity = panel, offset = { render_x + half_width, BACKER_Y_OFFSET + BACKER_HALF_HEIGHT } },
+      left_top = { entity = panel, offset = { render_x - half_width, backer_y - BACKER_HALF_HEIGHT } },
+      right_bottom = { entity = panel, offset = { render_x + half_width, backer_y + BACKER_HALF_HEIGHT } },
       forces = panel.force,
     }
     seg_bucket.backer = rect and rect.id or nil
@@ -1182,14 +1309,14 @@ local function render_segment(panel, panel_unit, seg_idx, seg_cfg, merged_tbl, s
     local txt = rendering.draw_text{
       text = message,
       surface = panel.surface,
-      target = { entity = panel, offset = { render_x, TEXT_Y_OFFSET } },
-      color = {1, 1, 1},
+      target = { entity = panel, offset = { render_x, text_y } },
+      color = { 1, 1, 1 },
       scale = TEXT_SCALE,
       scale_with_zoom = true,
       alignment = "center",
       vertical_alignment = "middle",
       forces = panel.force,
-      use_rich_text = true
+      use_rich_text = true,
     }
     seg_bucket.text = txt and txt.id or nil
   end
@@ -1245,6 +1372,7 @@ local function update_hover_render_for_player(player)
         state.segments[seg_idx] = nil
       end
       state.hashes[seg_idx] = nil
+
     elseif new_hash ~= old_hash then
       local seg = state.segments[seg_idx]
       if seg then
@@ -1255,10 +1383,28 @@ local function update_hover_render_for_player(player)
 
       local match = evaluate_segment_rules(seg_cfg, merged_tbl)
       if match then
-        local offsets = segment_offsets_for_count(pdata.segment_count)
-        local adjusts = segment_render_adjust_for_count(pdata.segment_count)
-        if offsets and offsets[seg_idx] then
-          local render_x = offsets[seg_idx] + ((adjusts and adjusts[seg_idx]) or 0)
+        local render_x, text_y, backer_y
+
+        if is_tall_panel(panel) then
+          local y_offsets = SEGMENT_Y_OFFSETS_TALL[pdata.segment_count]
+          if y_offsets and y_offsets[seg_idx] then
+            local bias = PANEL_TOP_BIAS_TALL[pdata.segment_count] or 0
+
+            render_x = TEXT_X_OFFSET_TALL
+            text_y = y_offsets[seg_idx] + TEXT_Y_OFFSET_TALL + bias
+            backer_y = y_offsets[seg_idx] + BACKER_Y_OFFSET_TALL + bias
+          end
+        else
+          local offsets = segment_offsets_for_count(pdata.segment_count)
+          local adjusts = segment_render_adjust_for_count(pdata.segment_count)
+          if offsets and offsets[seg_idx] then
+            render_x = offsets[seg_idx] + ((adjusts and adjusts[seg_idx]) or 0)
+            text_y = TEXT_Y_OFFSET
+            backer_y = BACKER_Y_OFFSET
+          end
+        end
+
+        if render_x ~= nil and text_y ~= nil and backer_y ~= nil then
           local rule = match.rule
           local message = rule.message or ""
           local seg_bucket = {}
@@ -1270,8 +1416,8 @@ local function update_hover_render_for_player(player)
               color = BACKER_COLOR,
               filled = true,
               surface = panel.surface,
-              left_top = { entity = panel, offset = { render_x - half_width, BACKER_Y_OFFSET - BACKER_HALF_HEIGHT } },
-              right_bottom = { entity = panel, offset = { render_x + half_width, BACKER_Y_OFFSET + BACKER_HALF_HEIGHT } },
+              left_top = { entity = panel, offset = { render_x - half_width, backer_y - BACKER_HALF_HEIGHT } },
+              right_bottom = { entity = panel, offset = { render_x + half_width, backer_y + BACKER_HALF_HEIGHT } },
               players = { player },
             }
             seg_bucket.backer = rect and rect.id or nil
@@ -1281,9 +1427,10 @@ local function update_hover_render_for_player(player)
             local txt = rendering.draw_text{
               text = message,
               surface = panel.surface,
-              target = { entity = panel, offset = { render_x, TEXT_Y_OFFSET } },
-              color = {1, 1, 1},
+              target = { entity = panel, offset = { render_x, text_y } },
+              color = { 1, 1, 1 },
               scale = TEXT_SCALE,
+              scale_with_zoom = true,
               alignment = "center",
               vertical_alignment = "middle",
               players = { player },
@@ -1323,7 +1470,6 @@ local function update_panel_render(panel, panel_unit, merged_tbl)
     end
   end
 end
-
 ------------------------------------------------------------
 -- Core mirror / update loop
 ------------------------------------------------------------
@@ -1339,10 +1485,10 @@ local function mirror_and_cache(panel_unit)
     clear_all_panel_render(panel_unit)
     clear_panel_chart_tag(panel_unit)
 
-    if ports and ports.right and ports.right.valid then
+    if ports and ports.output and ports.output.valid then
       local prev_hash = global.wdp.last_output_hash[panel_unit]
       if prev_hash ~= "" then
-        write_const(ports.right, {})
+        write_const(ports.output, {})
         global.wdp.last_output_hash[panel_unit] = ""
       end
     end
@@ -1355,13 +1501,13 @@ local function mirror_and_cache(panel_unit)
   update_panel_render(panel, panel_unit, merged_tbl)
   update_panel_chart_tag(panel, panel_unit, merged_tbl)
 
-  if not ports or not ports.right or not ports.right.valid then return end
+  if not ports or not ports.output or not ports.output.valid then return end
 
   local new_hash = hash_signal_table(merged_tbl)
   local old_hash = global.wdp.last_output_hash[panel_unit]
   if new_hash == old_hash then return end
 
-  write_const(ports.right, merged_tbl)
+  write_const(ports.output, merged_tbl)
   global.wdp.last_output_hash[panel_unit] = new_hash
 end
 
@@ -1379,11 +1525,6 @@ end
 ------------------------------------------------------------
 -- GUI helpers
 ------------------------------------------------------------
-
--- GUI state is intentionally lightweight:
---   panel_unit : currently edited panel
---   active_tab : active segment index
---   active_rule: active rule index for popups / reorder actions
 
 local function get_gui_state(player_index)
   ensure_global()
@@ -1579,24 +1720,33 @@ local function destroy_main_gui(player)
   global.wdp.gui[player.index] = nil
 end
 
-local function rebuild_connected_row(body, panel)
-  if body.wdp_connected_row and body.wdp_connected_row.valid then
-    body.wdp_connected_row.destroy()
+local function rebuild_connected_row(holder, panel)
+  if holder.wdp_connected_row and holder.wdp_connected_row.valid then
+    holder.wdp_connected_row.destroy()
   end
 
   local red_id, green_id = get_network_ids_by_color(panel)
 
-  local conn = body.add{ type = "flow", name = "wdp_connected_row", direction = "horizontal" }
-  conn.style.bottom_margin = 6
-  conn.style.horizontal_spacing = 4
+local conn = holder.add{
+  type = "flow",
+  name = "wdp_connected_row",
+  direction = "horizontal"
+}
+conn.style.horizontally_stretchable = true
+conn.style.horizontal_spacing = 4
+conn.style.vertical_align = "center"
+conn.style.height = 24
 
-  conn.add{ type = "label", caption = "Connected to:" }
+  local label = conn.add{ type = "label", caption = "Connected to:" }
+label.style.top_margin = 7
 
-  local red = conn.add{ type = "label", caption = tostring(red_id or 0) }
-  red.style.font_color = { 1, 0.23, 0.19 }
+local red = conn.add{ type = "label", caption = tostring(red_id or 0) }
+red.style.font_color = { 1, 0.23, 0.19 }
+red.style.top_margin = 7
 
-  local green = conn.add{ type = "label", caption = tostring(green_id or 0) }
-  green.style.font_color = { 0.25, 0.9, 0.25 }
+local green = conn.add{ type = "label", caption = tostring(green_id or 0) }
+green.style.font_color = { 0.25, 0.9, 0.25 }
+green.style.top_margin = 7
 end
 
 local function rebuild_alt_row(body, panel, player_index)
@@ -1608,12 +1758,12 @@ local function rebuild_alt_row(body, panel, player_index)
   if not seg then return end
 
   local row = body.add{ type = "flow", name = "wdp_alt_row", direction = "horizontal" }
-  row.style.bottom_margin = 6
+  row.style.bottom_margin = 7
 
   row.add{
     type = "checkbox",
     name = "wdp_show_in_alt_mode",
-    caption = "Show in alt mode",
+    caption = 'Always show in "Alt-mode"',
     state = seg.show_in_alt_mode == true
   }
 end
@@ -1646,18 +1796,53 @@ local function rebuild_segment_tabs(frame, panel, player_index)
   local pdata = ensure_panel_segment_data(panel)
   if not pdata then return end
 
-  local tabs = body.add{ type = "flow", name = "wdp_tabs", direction = "horizontal" }
-  tabs.style.horizontal_spacing = 4
-  tabs.style.top_margin = 4
-  tabs.style.bottom_margin = 6
+  local outer = body.add{ type = "flow", name = "wdp_tabs", direction = "horizontal" }
+  outer.style.horizontally_stretchable = true
+  outer.style.top_margin = 4
+  outer.style.bottom_margin = 8
+
+  local left_spacer = outer.add{ type = "empty-widget" }
+  left_spacer.style.horizontally_stretchable = true
+
+  local inner = outer.add{ type = "flow", name = "wdp_tabs_inner", direction = "horizontal" }
+  inner.style.horizontal_spacing = 8
+  inner.style.vertical_align = "center"
+
+  local seg_flow = inner.add{ type = "flow", name = "wdp_segment_flow", direction = "horizontal" }
+  seg_flow.style.horizontal_spacing = 4
+  seg_flow.style.vertical_align = "center"
 
   for i = 1, pdata.segment_count do
-    local b = tabs.add{ type = "button", name = "wdp_tab_" .. i, caption = tostring(i) }
-    b.style.minimal_width = 40
-    if get_gui_state(player_index).active_tab == i then
-      b.enabled = false
-    end
+  local b = seg_flow.add{
+    type = "sprite-button",
+    name = "wdp_tab_" .. i,
+    style = "train_schedule_delete_button",
+    sprite = "virtual-signal/signal-" .. i,
+    tooltip = "Select segment " .. i
+  }
+
+  b.style.width = 26
+  b.style.height = 26
+
+  if get_gui_state(player_index).active_tab == i then
+    b.enabled = false
   end
+end
+  
+  local spacer = inner.add{ type = "empty-widget" }
+  spacer.style.width = 100
+
+  local cp_flow = inner.add{ type = "flow", name = "wdp_copy_paste_flow", direction = "horizontal" }
+  cp_flow.style.horizontal_spacing = 8
+  cp_flow.style.vertical_align = "center"
+
+  cp_flow.add{ type = "button", name = "wdp_copy_segment", caption = "Copy segment" }
+
+  local paste_btn = cp_flow.add{ type = "button", name = "wdp_paste_segment", caption = "Paste segment" }
+  paste_btn.enabled = not not (global.wdp.clipboard[player_index] and global.wdp.clipboard[player_index].kind == "segment")
+
+  local right_spacer = outer.add{ type = "empty-widget" }
+  right_spacer.style.horizontally_stretchable = true
 end
 
 local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl, rule_count)
@@ -1665,20 +1850,41 @@ local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl
     type = "frame",
     name = "wdp_rule_" .. rule_idx,
     direction = "vertical",
+    style = "shallow_frame",
     tags = { rule_index = rule_idx, segment_index = seg_idx }
   }
   row.style.horizontally_stretchable = true
-  row.style.top_padding = 6
-  row.style.bottom_padding = 6
-  row.style.left_padding = 8
-  row.style.right_padding = 8
-  row.style.bottom_margin = 6
+  row.style.top_padding = 0
+  row.style.bottom_padding = 0
+  row.style.left_padding = 0
+  row.style.right_padding = 0
+  row.style.bottom_margin = 2
 
   local line = row.add{ type = "flow", name = "wdp_line", direction = "horizontal" }
-  line.style.horizontal_spacing = 6
+  line.style.horizontal_spacing = 3
   line.style.vertical_align = "center"
+  line.style.height = 30
+  line.style.left_margin = 4
+  line.style.right_margin = 4
+  line.style.top_margin = 2
+  line.style.bottom_margin = 2
 
-  line.add{ type = "choose-elem-button", name = "wdp_icon_signal", elem_type = "signal", signal = clone_signal(rule.icon_signal) }
+  line.add{
+  type = "choose-elem-button",
+  name = "wdp_icon_signal",
+  elem_type = "signal",
+  signal = clone_signal(rule.icon_signal)
+}
+
+  local preview = line.add{
+    type = "label",
+    name = "wdp_message_preview",
+    caption = message_preview_text(rule.message)
+  }
+  preview.style.minimal_width = 70
+  preview.style.maximal_width = 70
+  preview.style.single_line = true
+  preview.style.font_color = { 0.85, 0.85, 0.85 }
 
   local edit_btn = line.add{
     type = "sprite-button",
@@ -1689,55 +1895,88 @@ local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl
     tooltip = "Edit message",
     tags = { rule_index = rule_idx, segment_index = seg_idx }
   }
-  edit_btn.style.width = 28
-  edit_btn.style.height = 28
-
-  local preview = line.add{ type = "label", name = "wdp_message_preview", caption = message_preview_text(rule.message) }
-  preview.style.minimal_width = 160
-  preview.style.maximal_width = 160
-  preview.style.single_line = true
-  preview.style.font_color = { 0.85, 0.85, 0.85 }
+  edit_btn.style.width = 24
+  edit_btn.style.height = 24
+  edit_btn.style.left_margin = -3
 
   local gap1 = line.add{ type = "empty-widget" }
-  gap1.style.width = 18
+  gap1.style.width = 70
   gap1.style.height = 1
 
-  line.add{ type = "choose-elem-button", name = "wdp_first_signal", elem_type = "signal", signal = clone_signal(rule.first_signal) }
+  line.add{
+  type = "choose-elem-button",
+  name = "wdp_first_signal",
+  elem_type = "signal",
+  signal = clone_signal(rule.icon_signal)
+}
 
   local dd = line.add{ type = "drop-down", name = "wdp_comparator" }
   dd.items = comparator_items()
   dd.selected_index = COMPARATOR_INDEX[rule.comparator] or 1
-  dd.style.width = 80
+  dd.style.width = 58
+  dd.style.height = 26
 
   if rule.rhs and rule.rhs.kind == "signal" and rule.rhs.signal then
     local rhs_sprite = sprite_path_from_signal(rule.rhs.signal)
-    local rhs_btn = line.add{ type = "sprite-button", name = "wdp_rhs_open_" .. rule_idx, sprite = rhs_sprite, tooltip = "Set RHS", tags = { rule_index = rule_idx, segment_index = seg_idx } }
-    rhs_btn.style.width = 40
-    rhs_btn.style.height = 40
+    local rhs_btn = line.add{
+      type = "sprite-button",
+      name = "wdp_rhs_open_" .. rule_idx,
+      sprite = rhs_sprite,
+      tooltip = "Set signal or constant",
+      tags = { rule_index = rule_idx, segment_index = seg_idx }
+    }
+    rhs_btn.style.width = 28
+    rhs_btn.style.height = 28
   else
-    local rhs_btn = line.add{ type = "button", name = "wdp_rhs_open_" .. rule_idx, caption = tostring(tonumber(rule.rhs and rule.rhs.constant) or 0), tooltip = "Set RHS", tags = { rule_index = rule_idx, segment_index = seg_idx } }
-    rhs_btn.style.minimal_width = 72
+    local rhs_btn = line.add{
+      type = "button",
+      name = "wdp_rhs_open_" .. rule_idx,
+      caption = tostring(tonumber(rule.rhs and rule.rhs.constant) or 0),
+      tooltip = "Set signal or constant",
+      tags = { rule_index = rule_idx, segment_index = seg_idx }
+    }
+    rhs_btn.style.minimal_width = 41
+    rhs_btn.style.height = 26
   end
 
-  local rhs_count = line.add{ type = "label", name = "wdp_rhs_count", caption = render_rhs_count_for_rule(panel, rule, merged_tbl) }
-  rhs_count.style.minimal_width = 36
-  rhs_count.style.font = "default-small"
-  rhs_count.style.font_color = { 0.75, 0.75, 0.75 }
+  local gap2 = line.add{ type = "empty-widget" }
+  gap2.style.width = 65
+  gap2.style.height = 1
 
-  local spacer = line.add{ type = "empty-widget" }
-  spacer.style.horizontally_stretchable = true
-  spacer.style.width = 8
-
-  local up = line.add{ type = "button", name = "wdp_rule_up_" .. rule_idx, caption = "↑", tooltip = "Move rule up", tags = { rule_index = rule_idx, segment_index = seg_idx } }
+  local up = line.add{
+    type = "sprite-button",
+    name = "wdp_rule_up_" .. rule_idx,
+    style = "train_schedule_delete_button",
+    sprite = "wdp_gui_arrow_up",
+    tooltip = "Move message up",
+    tags = { rule_index = rule_idx, segment_index = seg_idx }
+  }
   up.enabled = rule_idx > 1
-  up.style.minimal_width = 32
+  up.style.width = 26
+  up.style.height = 26
 
-  local down = line.add{ type = "button", name = "wdp_rule_down_" .. rule_idx, caption = "↓", tooltip = "Move rule down", tags = { rule_index = rule_idx, segment_index = seg_idx } }
+  local down = line.add{
+    type = "sprite-button",
+    name = "wdp_rule_down_" .. rule_idx,
+    style = "train_schedule_delete_button",
+    sprite = "wdp_gui_arrow_down",
+    tooltip = "Move message down",
+    tags = { rule_index = rule_idx, segment_index = seg_idx }
+  }
   down.enabled = rule_idx < rule_count
-  down.style.minimal_width = 32
+  down.style.width = 26
+  down.style.height = 26
 
-  local del = line.add{ type = "button", name = "wdp_rule_delete_" .. rule_idx, caption = "X", tooltip = "Delete rule", tags = { rule_index = rule_idx, segment_index = seg_idx } }
-  del.style.minimal_width = 32
+  local del = line.add{
+    type = "sprite-button",
+    name = "wdp_rule_delete_" .. rule_idx,
+    style = "train_schedule_delete_button",
+    sprite = "wdp_gui_remove",
+    tooltip = "Delete message",
+    tags = { rule_index = rule_idx, segment_index = seg_idx }
+  }
+  del.style.width = 26
+  del.style.height = 26
 end
 
 local function rebuild_editor(frame, panel, player_index, merged_tbl)
@@ -1749,43 +1988,50 @@ local function rebuild_editor(frame, panel, player_index, merged_tbl)
   local seg, seg_idx = get_active_segment_config(panel, player_index)
   if not seg then return end
 
-  local editor = body.add{ type = "frame", name = "wdp_editor", direction = "vertical" }
-  editor.style.top_padding = 8
-  editor.style.bottom_padding = 8
-  editor.style.left_padding = 10
-  editor.style.right_padding = 10
+  local editor = body.add{
+    type = "flow",
+    name = "wdp_editor",
+    direction = "vertical"
+  }
   editor.style.horizontally_stretchable = true
+  editor.style.top_margin = 4
 
-  local top = editor.add{ type = "flow", direction = "horizontal" }
-  top.style.vertical_align = "center"
+  local list_frame = editor.add{
+    type = "frame",
+    name = "wdp_rule_list_frame",
+    direction = "vertical",
+    style = "deep_frame_in_shallow_frame"
+  }
+  list_frame.style.horizontally_stretchable = true
+  list_frame.style.top_padding = 0
+  list_frame.style.bottom_padding = 0
+  list_frame.style.left_padding = 0
+  list_frame.style.right_padding = 0
+  list_frame.style.top_margin = 2
+  list_frame.style.bottom_margin = 4
 
-  local spacer = top.add{ type = "empty-widget" }
-  spacer.style.horizontally_stretchable = true
-
-  top.add{ type = "button", name = "wdp_copy_segment", caption = "Copy segment" }
-
-  local paste_btn = top.add{ type = "button", name = "wdp_paste_segment", caption = "Paste segment" }
-  paste_btn.enabled = not not (global.wdp.clipboard[player_index] and global.wdp.clipboard[player_index].kind == "segment")
-
-  top.add{ type = "button", name = "wdp_add_rule", caption = "Add rule" }
-
-  editor.add{ type = "line" }
-
-  local scroll = editor.add{ type = "scroll-pane", name = "wdp_rule_scroll", direction = "vertical" }
-  scroll.style.minimal_height = 220
-  scroll.style.maximal_height = 420
-  scroll.style.horizontally_stretchable = true
-  scroll.style.vertically_stretchable = true
-  scroll.horizontal_scroll_policy = "auto"
-  scroll.vertical_scroll_policy = "auto"
-
-  local list = scroll.add{ type = "flow", name = "wdp_rule_list", direction = "vertical" }
+  local list = list_frame.add{
+    type = "flow",
+    name = "wdp_rule_list",
+    direction = "vertical"
+  }
   list.style.horizontally_stretchable = true
   list.style.vertical_spacing = 0
 
   for i = 1, #seg.rules do
     build_rule_row(list, panel, seg_idx, i, seg.rules[i], merged_tbl, #seg.rules)
   end
+
+  local add_btn = list_frame.add{
+    type = "button",
+    name = "wdp_add_rule",
+    caption = "Add new message"
+  }
+  add_btn.style.horizontally_stretchable = true
+  add_btn.style.top_margin = 0
+  add_btn.style.left_margin = 0
+  add_btn.style.right_margin = 0
+  add_btn.style.height = 28
 end
 
 apply_gui_to_segment = function(player)
@@ -1825,11 +2071,15 @@ apply_gui_to_segment = function(player)
       end
     end
   end
+ 
 
-  local scroll = body.wdp_editor.wdp_rule_scroll
-  if not (scroll and scroll.valid and scroll.wdp_rule_list and scroll.wdp_rule_list.valid) then return end
+    local list_frame = body.wdp_editor.wdp_rule_list_frame
+if not (list_frame and list_frame.valid and list_frame.wdp_rule_list and list_frame.wdp_rule_list.valid) then return end
 
-  for _, child in ipairs(scroll.wdp_rule_list.children) do
+local list = list_frame.wdp_rule_list
+  if not (list and list.valid) then return end
+
+  for _, child in ipairs(list.children) do
     if child and child.valid then
       local idx = tonumber(child.tags and child.tags.rule_index)
       if idx and seg.rules[idx] then
@@ -1881,8 +2131,11 @@ refresh_main_gui = function(player)
     frame.wdp_titlebar.wdp_title.caption = spec and spec.title or "Widescreen Display Panel"
   end
 
+    if frame.wdp_connected_holder and frame.wdp_connected_holder.valid then
+    rebuild_connected_row(frame.wdp_connected_holder, panel)
+  end
+
   if frame.wdp_body and frame.wdp_body.valid then
-    rebuild_connected_row(frame.wdp_body, panel)
     rebuild_alt_row(frame.wdp_body, panel, player.index)
     rebuild_chart_row(frame.wdp_body, panel, player.index)
   end
@@ -1947,7 +2200,7 @@ local function refresh_rhs_popup(player)
     hovered_sprite = "wdp_gui_confirm_hover",
     clicked_sprite = "wdp_gui_confirm_onclick",
     disabled_sprite = "wdp_gui_confirm_disabled",
-    tooltip = "Use selected signal"
+    tooltip = "Use signal"
   }
   sig_ok.enabled = sig_pick.elem_value ~= nil
   sig_ok.style.width = 28
@@ -1996,17 +2249,34 @@ local function open_rhs_popup(player, seg_idx, rule_idx)
   popup.auto_center = true
   popup.style.width = 320
 
-  local titlebar = popup.add{ type = "flow", direction = "horizontal" }
+    local titlebar = popup.add{ type = "flow", direction = "horizontal" }
   titlebar.drag_target = popup
-  local title = titlebar.add{ type = "label", caption = "Set RHS" }
+
+  local title = titlebar.add{
+    type = "label",
+    caption = "Signal or constant",
+    style = "frame_title"
+  }
   title.drag_target = popup
-  local spacer = titlebar.add{ type = "empty-widget" }
-  spacer.style.horizontally_stretchable = true
-  spacer.style.height = 24
-  spacer.drag_target = popup
-  local close_btn = titlebar.add{ type = "sprite-button", name = "wdp_rhs_close", sprite = "utility/close", tooltip = "Close" }
-  close_btn.style.width = 28
-  close_btn.style.height = 28
+
+  local drag = titlebar.add{
+    type = "empty-widget",
+    style = "draggable_space_header"
+  }
+  drag.style.horizontally_stretchable = true
+  drag.style.height = 24
+  drag.drag_target = popup
+  drag.ignored_by_interaction = true
+
+  titlebar.add{
+    type = "sprite-button",
+    name = "wdp_rhs_close",
+    style = "frame_action_button",
+    sprite = "utility/close",
+    hovered_sprite = "utility/close_black",
+    clicked_sprite = "utility/close_black",
+    tooltip = "Close"
+  }
 
   popup.add{ type = "line" }
 
@@ -2028,17 +2298,35 @@ local function open_msg_icon_popup(player)
 
   local titlebar = popup.add{ type = "flow", direction = "horizontal" }
   titlebar.drag_target = popup
-  local title = titlebar.add{ type = "label", caption = "Insert icon" }
+
+  local title = titlebar.add{
+    type = "label",
+    caption = "Insert icon",
+    style = "frame_title"
+  }
   title.drag_target = popup
-  local spacer = titlebar.add{ type = "empty-widget" }
-  spacer.style.horizontally_stretchable = true
-  spacer.style.height = 24
-  spacer.drag_target = popup
-  local close_btn = titlebar.add{ type = "sprite-button", name = "wdp_msg_icon_close", sprite = "utility/close", tooltip = "Close" }
-  close_btn.style.width = 28
-  close_btn.style.height = 28
+
+  local drag = titlebar.add{
+    type = "empty-widget",
+    style = "draggable_space_header"
+  }
+  drag.style.horizontally_stretchable = true
+  drag.style.height = 24
+  drag.drag_target = popup
+  drag.ignored_by_interaction = true
+
+  titlebar.add{
+    type = "sprite-button",
+    name = "wdp_msg_icon_close",
+    style = "frame_action_button",
+    sprite = "utility/close",
+    hovered_sprite = "utility/close_black",
+    clicked_sprite = "utility/close_black",
+    tooltip = "Close"
+  }
 
   popup.add{ type = "line" }
+
   local body = popup.add{ type = "frame", name = "wdp_msg_icon_body", direction = "vertical" }
   body.style.top_padding = 10
   body.style.bottom_padding = 10
@@ -2065,15 +2353,32 @@ local function open_message_popup(player, seg_idx, rule_idx)
 
   local titlebar = popup.add{ type = "flow", direction = "horizontal" }
   titlebar.drag_target = popup
-  local title = titlebar.add{ type = "label", caption = "Edit message" }
+
+  local title = titlebar.add{
+    type = "label",
+    caption = "Edit message",
+    style = "frame_title"
+  }
   title.drag_target = popup
-  local spacer = titlebar.add{ type = "empty-widget" }
-  spacer.style.horizontally_stretchable = true
-  spacer.style.height = 24
-  spacer.drag_target = popup
-  local close_btn = titlebar.add{ type = "sprite-button", name = "wdp_msg_close", sprite = "utility/close", tooltip = "Close" }
-  close_btn.style.width = 28
-  close_btn.style.height = 28
+
+  local drag = titlebar.add{
+    type = "empty-widget",
+    style = "draggable_space_header"
+  }
+  drag.style.horizontally_stretchable = true
+  drag.style.height = 24
+  drag.drag_target = popup
+  drag.ignored_by_interaction = true
+
+  titlebar.add{
+    type = "sprite-button",
+    name = "wdp_msg_close",
+    style = "frame_action_button",
+    sprite = "utility/close",
+    hovered_sprite = "utility/close_black",
+    clicked_sprite = "utility/close_black",
+    tooltip = "Close"
+  }
 
   popup.add{ type = "line" }
 
@@ -2088,7 +2393,13 @@ local function open_message_popup(player, seg_idx, rule_idx)
   icon_row.style.bottom_margin = 8
   icon_row.style.vertical_align = "center"
 
-  local open_btn = icon_row.add{ type = "sprite-button", name = "wdp_msg_icon_open", sprite = "wdp_gui_insert", hovered_sprite = "wdp_gui_insert_hover", tooltip = "Insert icon into message" }
+  local open_btn = icon_row.add{
+    type = "sprite-button",
+    name = "wdp_msg_icon_open",
+    sprite = "wdp_gui_insert",
+    hovered_sprite = "wdp_gui_insert_hover",
+    tooltip = "Insert icon into message"
+  }
   open_btn.style.width = 28
   open_btn.style.height = 28
 
@@ -2100,7 +2411,15 @@ local function open_message_popup(player, seg_idx, rule_idx)
   footer.style.top_margin = 6
   local footer_spacer = footer.add{ type = "empty-widget" }
   footer_spacer.style.horizontally_stretchable = true
-  local ok_btn = footer.add{ type = "sprite-button", name = "wdp_msg_apply", sprite = "wdp_gui_confirm", hovered_sprite = "wdp_gui_confirm_hover", clicked_sprite = "wdp_gui_confirm_onclick", disabled_sprite = "wdp_gui_confirm_disabled", tooltip = "Apply message" }
+  local ok_btn = footer.add{
+    type = "sprite-button",
+    name = "wdp_msg_apply",
+    sprite = "wdp_gui_confirm",
+    hovered_sprite = "wdp_gui_confirm_hover",
+    clicked_sprite = "wdp_gui_confirm_onclick",
+    disabled_sprite = "wdp_gui_confirm_disabled",
+    tooltip = "Apply message"
+  }
   ok_btn.style.width = 28
   ok_btn.style.height = 28
 end
@@ -2134,25 +2453,62 @@ local function open_panel_gui(player, panel)
   local spec = PANEL_SPECS[panel.name]
   local frame = player.gui.screen.add{ type = "frame", name = "wdp_main", direction = "vertical" }
   frame.auto_center = true
-  frame.style.width = 860
+  frame.style.width = 560
 
-  local titlebar = frame.add{ type = "flow", name = "wdp_titlebar", direction = "horizontal" }
+    local titlebar = frame.add{ type = "flow", name = "wdp_titlebar", direction = "horizontal" }
   titlebar.drag_target = frame
-  local title = titlebar.add{ type = "label", name = "wdp_title", caption = spec and spec.title or "Widescreen Display Panel" }
-  title.style.single_line = true
-  title.style.right_margin = 8
+
+  local title = titlebar.add{
+    type = "label",
+    name = "wdp_title",
+    caption = spec and spec.title or "Widescreen Display Panel",
+    style = "frame_title"
+  }
   title.drag_target = frame
-  local spacer = titlebar.add{ type = "empty-widget" }
-  spacer.style.horizontally_stretchable = true
-  spacer.style.height = 24
-  spacer.drag_target = frame
-  local close_btn = titlebar.add{ type = "sprite-button", name = "wdp_close", sprite = "utility/close", tooltip = "Close" }
-  close_btn.style.width = 28
-  close_btn.style.height = 28
+  title.style.single_line = true
+
+  local drag = titlebar.add{
+    type = "empty-widget",
+    name = "wdp_drag_handle",
+    style = "draggable_space_header"
+  }
+  drag.style.horizontally_stretchable = true
+  drag.style.height = 24
+  drag.drag_target = frame
+  drag.ignored_by_interaction = true
+
+  local close_btn = titlebar.add{
+    type = "sprite-button",
+    name = "wdp_close",
+    style = "frame_action_button",
+    sprite = "utility/close",
+    hovered_sprite = "utility/close_black",
+    clicked_sprite = "utility/close_black",
+    tooltip = "Close"
+  }
 
   frame.add{ type = "line" }
 
-  local body = frame.add{ type = "frame", name = "wdp_body", direction = "vertical" }
+  local connected_holder = frame.add{
+    type = "frame",
+    name = "wdp_connected_holder",
+    direction = "vertical",
+    style = "subheader_frame"
+  }
+  connected_holder.style.horizontally_stretchable = true
+  connected_holder.style.top_padding = 0
+  connected_holder.style.bottom_padding = 0
+  connected_holder.style.left_padding = 6
+  connected_holder.style.right_padding = 6
+  connected_holder.style.top_margin = 0
+  connected_holder.style.bottom_margin = 0
+
+  local body = frame.add{
+    type = "frame",
+    name = "wdp_body",
+    direction = "vertical",
+    style = "inside_shallow_frame"
+  }
   body.style.top_padding = 8
   body.style.bottom_padding = 8
   body.style.left_padding = 10
@@ -2520,18 +2876,31 @@ end)
 ------------------------------------------------------------
 -- Scan / build / remove / rotation stop
 ------------------------------------------------------------
+local function panel_names_list()
+  local names = {}
+
+  local entity_prototypes = prototypes and prototypes.entity
+
+  for name, _ in pairs(PANEL_SPECS) do
+    if not entity_prototypes or entity_prototypes[name] then
+      names[#names + 1] = name
+    end
+  end
+
+  return names
+end
 
 local function scan_all_existing()
   ensure_global()
+  local names = panel_names_list()
+
   for _, surface in pairs(game.surfaces) do
-    for name, _ in pairs(PANEL_SPECS) do
-      for _, e in pairs(surface.find_entities_filtered { name = name }) do
-        if e.direction ~= defines.direction.north then
-          e.direction = defines.direction.north
-        end
-        ensure_panel_runtime(e)
-        mirror_and_cache(e.unit_number)
+    for _, e in pairs(surface.find_entities_filtered { name = names }) do
+      if e.direction ~= defines.direction.north then
+        e.direction = defines.direction.north
       end
+      ensure_panel_runtime(e)
+      mirror_and_cache(e.unit_number)
     end
   end
 end
@@ -2550,7 +2919,7 @@ end
 local function on_removed(event)
   local ent = event.entity
   if is_panel(ent) then
-    destroy_right_ports_for_removed_panel(ent)
+    destroy_ports_for_removed_panel(ent)
     detach_ports(ent)
   end
 end

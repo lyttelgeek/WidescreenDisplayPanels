@@ -1,16 +1,17 @@
 # Widescreen Display Panels
 
-![Panels](thumbnail.png)
-
-Adds 2x1, 3x1, and 4x1 widescreen variants of the vanilla display panel, designed for cleaner dashboards and improved readability in circuit network setups.
+Adds 2x1, 3x1, and 4x1 widescreen and tallscreen variants of the vanilla display panel, designed for cleaner dashboards and improved readability/organisation in circuit network setups.
 
 ## Features
 
-- Three new panel sizes:
+- Three new panel sizes in two orientations:
 
   - 2x1 widescreen display panel
   - 3x1 widescreen display panel
   - 4x1 widescreen display panel
+  - 1x2 tallscreen display panel
+  - 1x3 tallscreen display panel
+  - 1x4 tallscreen display panel
 
 - Fully compatible with circuit networks
 
@@ -22,7 +23,7 @@ Adds 2x1, 3x1, and 4x1 widescreen variants of the vanilla display panel, designe
   - Signal-based conditions
   - Custom messages and icons
   - Optional alt-mode visibility
-  - Optional chart tag display (one icon per panel)
+  - Optional chart tag display
 
 - Copy and paste segment configurations between panels
 
@@ -37,17 +38,17 @@ Each panel is divided into horizontal segments depending on its width. Each segm
 - Evaluates rules in order
 - Displays the first matching rule
 - Can show an icon and/or message
-- Can optionally display always in alt-mode
-- Can optionally create a chart tag from one segment
+- Can optionally display in alt-mode
+- Can optionally create a chart tag
 
-## Wiring
+### Wiring
 
-- The **left side** of the panel functions as the circuit input
-- The **right side** uses an invisible connector that outputs the merged signals
+- The **top** and **left side** of the panel functions as the circuit input on the vertical and horizontals screens respectively.
+- Likewise the **bottom** and **right side** uses an invisible connector that outputs the merged signals
 
-This allows panels to act as both display and passthrough components in circuit networks, and enables clean panel-chaining.
+This allows panels to act as both display and passthrough components in circuit networks. 
 
-## Copy and Paste
+### Copy and Paste
 
 Segments can be copied and pasted:
 
@@ -56,7 +57,8 @@ Segments can be copied and pasted:
 
 ## Unlocking
 
-All widescreen panels are unlocked alongside the vanilla display panel via circuit network research. They use the vanilla panel's recipe multiplied by the panel's width.
+All widescreen panels are unlocked alongside the vanilla display panel via circuit network research. 
+They use the vanilla panel recipe multiplied by the panel's length.
 
 ## Notes
 
@@ -65,8 +67,8 @@ All widescreen panels are unlocked alongside the vanilla display panel via circu
 
 ## Compatibility
 
-- Requires **Factorio 2.0+**
-- Space Age compatible (not required)
+- Factorio 2.0+
+- Space age compatible (not required)
 - Compatible with most mods that interact with display panels or circuit networks
 
 ## Known limitations
@@ -76,9 +78,5 @@ All widescreen panels are unlocked alongside the vanilla display panel via circu
 
 ## Future plans
 
-- Tallscreen panel variants
-- Additional quality-of-life improvements
+- Additional quality-of-life improvements/tweaks
 
-## Current Version
-
-[v1.0.0 Initial Stable Release](https://github.com/lyttelgeek/WidescreenDisplayPanels/releases/tag/1.0.0-Initial_Release)

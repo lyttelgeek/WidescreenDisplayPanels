@@ -48,123 +48,107 @@ local function try_shift_native_connector_north_only(base, red_shift_px, green_s
 
   if not base.circuit_connector then return end
 
-
   local north = base.circuit_connector[1]
   if north and north.points then
     shift_connector_points_rg(north.points, red_shift, green_shift)
   end
 end
 
--- LOCKED family constants
 local MAIN_SCALE = 0.515
 local MAIN_SHIFT_PX = 0
 local MAIN_SHIFT_PY = -3
 
--- LOCKED native connector relocation:
 local CONNECTOR_SHIFT_PX = {
-  ["widescreen-display-panel-2x1"] = {
-    red   = { -16, 18 },
-    green = { -41, 4 },
-  },
-  ["widescreen-display-panel-3x1"] = {
-    red   = { -27, 18 },
-    green = { -52, 4 },
-  },
-  ["widescreen-display-panel-4x1"] = {
-    red   = { -35, 18 },
-    green = { -60, 4 },
-  },
+  ["widescreen-display-panel-2x1"] = { red = { -16, 18 }, green = { -41, 4 } },
+  ["widescreen-display-panel-3x1"] = { red = { -27, 18 }, green = { -52, 4 } },
+  ["widescreen-display-panel-4x1"] = { red = { -35, 18 }, green = { -60, 4 } },
+  ["widescreen-display-panel-1x2"] = { red = { -1, -13.5 }, green = { -1, -13.5 } },
+  ["widescreen-display-panel-1x3"] = { red = { -1, -29.5 }, green = { -1, -29.5 } },
+  ["widescreen-display-panel-1x4"] = { red = { -1, -45.5 }, green = { -1, -45.5 } },
+  
+  
 }
 
 local PANELS = {
-  {
-    name = "widescreen-display-panel-2x1",
-    tiles_w = 2,
-    tiles_h = 1,
-    main   = { filename = "2x1.png",        w = 122, h = 74 },
-    shadow = { filename = "2x1-shadow.png", w = 128, h = 42 },
-    shadow_offset = { x = 6, y = 8 },
-  },
-  {
-    name = "widescreen-display-panel-3x1",
-    tiles_w = 3,
-    tiles_h = 1,
-    main   = { filename = "3x1.png",        w = 163, h = 75 },
-    shadow = { filename = "3x1-shadow.png", w = 171, h = 42 },
-    shadow_offset = { x = 8, y = 8 },
-  },
-  {
-    name = "widescreen-display-panel-4x1",
-    tiles_w = 4,
-    tiles_h = 1,
-    main   = { filename = "4x1.png",        w = 196, h = 72 },
-    shadow = { filename = "4x1-shadow.png", w = 208, h = 42 },
-    shadow_offset = { x = 8, y = 8 },
-  },
+  { name="widescreen-display-panel-2x1", tiles_w=2, tiles_h=1,
+    main={filename="2x1.png", w=122, h=74},
+    shadow={filename="2x1-shadow.png", w=128, h=42}, shadow_offset={x=6,y=8} },
+
+  { name="widescreen-display-panel-3x1", tiles_w=3, tiles_h=1,
+    main={filename="3x1.png", w=163, h=75},
+    shadow={filename="3x1-shadow.png", w=171, h=42}, shadow_offset={x=8,y=8} },
+
+  { name="widescreen-display-panel-4x1", tiles_w=4, tiles_h=1,
+    main={filename="4x1.png", w=196, h=72},
+    shadow={filename="4x1-shadow.png", w=208, h=42}, shadow_offset={x=6,y=8} },
+
+  { name="widescreen-display-panel-1x2", tiles_w=1, tiles_h=2,
+    main={filename="1x2.png", w=85, h=159},
+    shadow={filename="1x2-shadow.png", w=86, h=160}, shadow_offset={x=2,y=0} },
+
+  { name="widescreen-display-panel-1x3", tiles_w=1, tiles_h=3,
+    main={filename="1x3.png", w=84, h=199},
+    shadow={filename="1x3-shadow.png", w=89, h=199}, shadow_offset={x=2,y=0},
+    y_offset_px = -5.75 },
+
+  { name="widescreen-display-panel-1x4", tiles_w=1, tiles_h=4,
+    main={filename="1x4.png", w=84, h=270},
+    shadow={filename="1x4-shadow.png", w=87, h=270}, shadow_offset={x=2,y=0},
+    y_offset_px = -3.25 },
 }
 
 local function make_panel_entity(spec)
   local base = util.table.deepcopy(data.raw["display-panel"]["display-panel"])
-  if not base then
-    error("WidescreenDisplayPanels: vanilla display-panel prototype not found")
-  end
-
   base.name = spec.name
   base.minable.result = spec.name
-
   base.corpse = spec.name .. "-remnants"
   base.remains_when_mined = spec.name .. "-remnants"
-
-  base.collision_box = box_for_tiles(spec.tiles_w, spec.tiles_h or 1, 0.05)
-  base.selection_box = box_for_tiles(spec.tiles_w, spec.tiles_h or 1, 0.00)
-
-  -- Disable rotation entirely
+  base.collision_box = box_for_tiles(spec.tiles_w, spec.tiles_h, 0.05)
+  base.selection_box = box_for_tiles(spec.tiles_w, spec.tiles_h, 0.00)
   base.rotatable = false
 
-  -- Permanently keep the native connector enabled
-  if base.circuit_wire_max_distance == nil or base.circuit_wire_max_distance <= 0 then
+  if not base.circuit_wire_max_distance or base.circuit_wire_max_distance <= 0 then
     base.circuit_wire_max_distance = 9
   end
 
-  -- Move native connector
   local conn_shift = CONNECTOR_SHIFT_PX[spec.name]
   if conn_shift then
     try_shift_native_connector_north_only(base, conn_shift.red, conn_shift.green)
   end
 
-  local main_shift = util.by_pixel(MAIN_SHIFT_PX, MAIN_SHIFT_PY)
-  local shadow_shift = util.by_pixel(
-    MAIN_SHIFT_PX + spec.shadow_offset.x,
-    MAIN_SHIFT_PY + spec.shadow_offset.y
-  )
+  local extra_y = spec.y_offset_px or 0
 
-  local function make_dir()
-    return {
-      layers = {
-        {
-          filename = MOD .. "/graphics/entity/widescreen-display-panel/" .. spec.main.filename,
-          width = spec.main.w,
-          height = spec.main.h,
-          shift = main_shift,
-          scale = MAIN_SCALE,
-          priority = "high",
-        },
-        {
-          filename = MOD .. "/graphics/entity/widescreen-display-panel/" .. spec.shadow.filename,
-          width = spec.shadow.w,
-          height = spec.shadow.h,
-          shift = shadow_shift,
-          scale = MAIN_SCALE,
-          draw_as_shadow = true,
-          priority = "high",
-        }
+local main_shift = util.by_pixel(
+  MAIN_SHIFT_PX,
+  MAIN_SHIFT_PY + extra_y
+)
+
+local shadow_shift = util.by_pixel(
+  MAIN_SHIFT_PX + spec.shadow_offset.x,
+  MAIN_SHIFT_PY + spec.shadow_offset.y + extra_y
+)
+
+  local d = {
+    layers = {
+      {
+        filename = MOD .. "/graphics/entity/widescreen-display-panel/" .. spec.main.filename,
+        width = spec.main.w,
+        height = spec.main.h,
+        shift = main_shift,
+        scale = MAIN_SCALE,
+      },
+      {
+        filename = MOD .. "/graphics/entity/widescreen-display-panel/" .. spec.shadow.filename,
+        width = spec.shadow.w,
+        height = spec.shadow.h,
+        shift = shadow_shift,
+        scale = MAIN_SCALE,
+        draw_as_shadow = true,
       }
     }
-  end
+  }
 
-  local d = make_dir()
-  base.sprites = { north = d, east = d, south = d, west = d }
-
+  base.sprites = { north=d, east=d, south=d, west=d }
   return base
 end
 
@@ -172,4 +156,5 @@ local out = {}
 for _, spec in ipairs(PANELS) do
   table.insert(out, make_panel_entity(spec))
 end
+
 data:extend(out)

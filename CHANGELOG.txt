@@ -1,18 +1,40 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.1.0
+---------------------------------------------------------------------------------------------------
+
+Features:
+  - Added tallscreen display panels (1x2, 1x3, 1x4)
+  - Same behaviour as widescreen panels
+  - Vertical icon/message layout
+  - Signal input at top, output connector at bottom
+
+UI:
+  - Refined GUI to better match vanilla style
+  - Improved layout, spacing, and alignment
+  - Updated and cleaned up icons
+
+Changes:
+  - Renamed "Show in alt mode" to "Always show in Alt-Mode"
+
+Fixes:
+  - Fixed message text scaling when alt-mode display is disabled
+  - Fixed item signal icons not rendering on panels
+
+---------------------------------------------------------------------------------------------------
 Version: 1.0.0
 ---------------------------------------------------------------------------------------------------
 
 Features:
   - Initial release
-  - Added 2x1, 3x1, and 4x1 widescreen display panels
+  - Added widescreen display panels (2x1, 3x1, 4x1)
   - Segment-based display system
-  - Multi-rule support per segment
+  - Multiple rules per segment
   - Icon and message rendering
   - Alt-mode visibility option
   - Chart tag support
 
 Integration:
-  - Display Signal Counts (DSC) compatibility
+  - Compatible with Display Signal Counts (DSC)
 
 UI:
   - Custom configuration GUI
@@ -20,9 +42,9 @@ UI:
   - Message editor with icon insertion
 
 Quality of Life:
-  - Segment copy and paste support
+  - Copy and paste segment settings
 
 Technical:
   - Persistent GUI state across save/load
-  - Improved message backer sizing for rich text
+  - Improved message background sizing for rich text
   - Stable runtime behaviour and rendering

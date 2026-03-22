@@ -1,6 +1,23 @@
 data:extend({
 
--- Confirm button
+{
+    type = "sprite",
+    name = "wdp_gui_arrow_up",
+    filename = "__base__/graphics/icons/arrows/up-arrow.png",
+    size = 64
+},
+{
+    type = "sprite",
+    name = "wdp_gui_arrow_down",
+    filename = "__base__/graphics/icons/arrows/down-arrow.png",
+    size = 64
+},
+{
+    type = "sprite",
+    name = "wdp_gui_remove",
+    filename = "__base__/graphics/icons/shapes/shape-diagonal-cross.png",
+    size = 64
+},
 {
     type = "sprite",
     name = "wdp_gui_confirm",
@@ -25,8 +42,6 @@ data:extend({
     filename = "__WidescreenDisplayPanels__/graphics/icons/wdp_gui_confirm_disabled.png",
     size = 28
 },
-
--- Edit button
 {
     type = "sprite",
     name = "wdp_gui_edit",
@@ -45,8 +60,6 @@ data:extend({
     filename = "__WidescreenDisplayPanels__/graphics/icons/wdp_gui_edit_onclick.png",
     size = 28
 },
-
--- Insert icon button
 {
     type = "sprite",
     name = "wdp_gui_insert",
