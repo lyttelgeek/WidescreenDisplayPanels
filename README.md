@@ -1,7 +1,14 @@
 # Widescreen Display Panels
 
+<p align="center">
+  <img src="thumbnail.png" alt="Panels"/>
+ </p>
+<p align="left">
 Adds 2x1, 3x1, and 4x1 widescreen and tallscreen variants of the vanilla display panel, designed for cleaner dashboards and improved readability/organisation in circuit network setups.
-
+</p>
+<p align="center">
+  <img src="thumbnail2.png" alt="Update"/>
+ </p>
 ## Features
 
 - Three new panel sizes in two orientations:
