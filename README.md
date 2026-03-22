@@ -87,3 +87,7 @@ They use the vanilla panel recipe multiplied by the panel's length.
 
 - Additional quality-of-life improvements/tweaks
 
+## Latest Version
+
+[1.1.0 Tallscreen Update](https://github.com/lyttelgeek/WidescreenDisplayPanels/releases/tag/1.1.0-Tallscreen_Update) 
+
