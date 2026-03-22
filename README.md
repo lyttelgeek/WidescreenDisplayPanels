@@ -50,7 +50,7 @@ Each panel is divided into segments depending on its length. Each segment behave
 
 ### Wiring
 
-- The **top** and **left side** of the panel functions as the circuit input on the vertical and horizontals screens respectively.
+- The **top** and **left side** of the panel functions as the circuit input on the **vertical** and **horizontal screens** respectively.
 - Likewise the **bottom** and **right side** uses an invisible connector that outputs the merged signals
 
 This allows panels to act as both display and passthrough components in circuit networks. 
