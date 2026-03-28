@@ -99,7 +99,7 @@ All widescreen panels are unlocked alongside the vanilla display panel via circu
 - Factorio 2.0+
 - Space age compatible (not required)
 - Compatible with most mods that interact with display panels or circuit networks
-- Features remote integration witb Display Signal Counts
+- Features remote integration with [Display Signal Counts](https://github.com/lyttelgeek/DisplaySignalCounts)
 
 ## Known limitations
 
