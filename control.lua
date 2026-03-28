@@ -1260,9 +1260,11 @@ end
 -- Read a smart combinator's computed output into a flat
 -- key->count table.
 --
--- Using signals_last_tick from LuaCombinatorControlBehavior
+-- We use signals_last_tick from LuaCombinatorControlBehavior
 -- which gives the signals the combinator *output* last tick
--- directly, no need to read a circuit network at all.
+-- directly -- no need to read a circuit network at all.
+-- This works regardless of whether the output connectors
+-- are wired to anything.
 ------------------------------------------------------------
 local function read_combinator_output_to_table(ent)
   local out = {}
@@ -1984,7 +1986,7 @@ local function format_si_compact(n)
     return string.format("%s%.1fT", sign, abs_n / 1000000000000):gsub("%.0T", "T")
   end
 end
-local tick_update_gui_signal_bars    -- defined after get_gui_state
+local tick_update_gui_signal_bars  -- defined after get_gui_state
 local tick_update_signal_bar         -- defined after get_gui_state
 local rebuild_signal_bar             -- defined after get_gui_state
 
@@ -2123,8 +2125,40 @@ local function tbl_to_sorted_entries(t)
 end
 
 rebuild_signal_bar = function(frame, panel, player_index)
-  local holder = frame.wdp_signal_bar_holder
-  if not (holder and holder.valid) then return end
+  local body = frame.wdp_body
+  if not (body and body.valid) then return end
+
+  -- Destroy and re-add holder and footer so they are always
+  -- the last children of body, regardless of rebuild order.
+  if body.wdp_signal_bar_holder and body.wdp_signal_bar_holder.valid then
+    body.wdp_signal_bar_holder.destroy()
+  end
+  if body.wdp_footer and body.wdp_footer.valid then
+    body.wdp_footer.destroy()
+  end
+
+  local holder = body.add{
+    type = "frame",
+    name = "wdp_signal_bar_holder",
+    direction = "vertical",
+    style = "inside_shallow_frame"
+  }
+  holder.style.horizontally_stretchable = true
+  holder.style.top_margin = 4
+  holder.style.bottom_margin = 0
+  holder.style.top_padding = 5
+  holder.style.bottom_padding = 5
+  holder.style.left_padding = 2
+  holder.style.right_padding = 2
+
+  local footer = body.add{ type = "flow", name = "wdp_footer", direction = "horizontal" }
+  footer.style.top_margin = 6
+  local footer_spacer = footer.add{ type = "empty-widget" }
+  footer_spacer.style.horizontally_stretchable = true
+  local confirm_btn = footer.add{ type = "sprite-button", name = "wdp_confirm", sprite = "wdp_gui_confirm", hovered_sprite = "wdp_gui_confirm_hover", clicked_sprite = "wdp_gui_confirm_onclick", disabled_sprite = "wdp_gui_confirm_disabled", tooltip = "Apply and close" }
+  confirm_btn.style.width = 28
+  confirm_btn.style.height = 28
+
   holder.clear()
 
   local red_tbl, green_tbl = get_active_segment_signals_by_wire(panel, player_index)
@@ -2168,7 +2202,7 @@ rebuild_signal_bar = function(frame, panel, player_index)
 end
 
 tick_update_signal_bar = function(frame, panel, player_index)
-  local holder = frame.wdp_signal_bar_holder
+  local holder = frame.wdp_body and frame.wdp_body.wdp_signal_bar_holder
   if not (holder and holder.valid) then return end
 
   local pane = holder.wdp_signal_pane
@@ -3977,29 +4011,8 @@ local function open_panel_gui(player, panel)
   body.style.left_padding = 10
   body.style.right_padding = 10
 
-  local signal_bar_holder = frame.add{
-    type = "frame",
-    name = "wdp_signal_bar_holder",
-    direction = "vertical",
-    style = "inside_shallow_frame"
-  }
-  signal_bar_holder.style.horizontally_stretchable = true
-  signal_bar_holder.style.top_margin = 4
-  signal_bar_holder.style.bottom_margin = 0
-  signal_bar_holder.style.top_padding = 5
-  signal_bar_holder.style.bottom_padding = 5
-  signal_bar_holder.style.left_padding = 2
-  signal_bar_holder.style.right_padding = 2
-
-  local footer = frame.add{ type = "flow", name = "wdp_footer", direction = "horizontal" }
-  footer.style.top_margin = 6
-  local footer_spacer = footer.add{ type = "empty-widget" }
-  footer_spacer.style.horizontally_stretchable = true
-  local confirm_btn = footer.add{ type = "sprite-button", name = "wdp_confirm", sprite = "wdp_gui_confirm", hovered_sprite = "wdp_gui_confirm_hover", clicked_sprite = "wdp_gui_confirm_onclick", disabled_sprite = "wdp_gui_confirm_disabled", tooltip = "Apply and close" }
-  confirm_btn.style.width = 28
-  confirm_btn.style.height = 28
-
   refresh_main_gui(player)
+
   player.opened = frame
 end
 
