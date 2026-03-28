@@ -37,7 +37,7 @@ Adds 2x1, 3x1, and 4x1 widescreen and tallscreen variants of the vanilla display
 
 ## Usage
 
-Each panel is divided into horizontal segments depending on its width. Each segment behaves as a single vanilla panel:
+Each panel is divided into horizontal/vertical segments depending on its length. Each segment behaves as a single vanilla panel:
 
 - Evaluates rules in order
 - Displays the first matching rule
@@ -53,6 +53,8 @@ Each panel is divided into horizontal segments depending on its width. Each segm
 This allows panels to act as both display and passthrough components in circuit networks.
 
 ### Smart Logic
+
+![smartgui](gui.png)
 
 Each segment has an optional smart logic system, accessible via the segment GUI. This allows signals to be transformed by combinators before being evaluated against display rules.
 
