@@ -68,14 +68,16 @@ Clicking the combinator icon button opens the native Factorio combinator GUI for
 
 ### Copy and Paste
 
-Segments can be copied and pasted:
+Segments and panels can be copied and pasted:
 
 - Copy a configured segment
-- Paste onto another segment or panel
+- Paste onto another segment/panel
+- Copy a configured full panel
+- Paste onto another panel (extra segments discarded/ignored)
 
 ## Recipes
 
-All panels require combinators in addition to the base display panel ingredients. Recipes are unlocked alongside the vanilla display panel via circuit network research.
+All panels require raw combinator ingredients in addition to the base display panel ingredients. Recipes are unlocked alongside the vanilla display panel via circuit network research.
 
 | Panel | Iron plate | Electronic circuit | Copper wire |
 |-------|------------|-------------------|-------------|
@@ -102,3 +104,7 @@ All widescreen panels are unlocked alongside the vanilla display panel via circu
 
 - No direct copy/paste from vanilla display panels
 - Panels are fixed orientation (no flipping/rotating)
+
+## Current Version
+
+[1.2.0 - Smartscreen Update]( )
