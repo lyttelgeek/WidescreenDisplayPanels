@@ -45,14 +45,14 @@ Each panel is divided into horizontal/vertical segments depending on its length.
 - Can optionally display in alt-mode
 - Can optionally create a chart tag
 
-### Wiring
+## Wiring
 
-- The **top** and **left side** of the panel functions as the circuit input on the vertical and horizontals screens respectively.
+- The **top** and **left side** of the panel functions as the circuit input on the **vertical** and **horizontal** screens respectively.
 - Likewise the **bottom** and **right side** uses an invisible connector that outputs the merged signals
 
 This allows panels to act as both display and passthrough components in circuit networks.
 
-### Smart Logic
+## Smart Logic
 
 ![smartgui](gui.png)
 
@@ -64,9 +64,9 @@ Each segment has an optional smart logic system, accessible via the segment GUI.
 - **Arithmetic A**: unlocked when Arithmetic B is enabled. Provides an upstream pre-processing stage; its output feeds into Arithmetic B.
 - **Decider**: independent of the arithmetic pipeline. Its output merges with the Arithmetic B result, with the decider winning on signal collision.
 
-Clicking the combinator icon button opens the native Factorio combinator GUI for full configuration. Combinator configuration is preserved when toggling on/off — only the master toggle destroys combinators.
+Clicking the combinator icon button opens the native Factorio combinator GUI for full configuration. Combinator configuration is preserved when toggling on/off; only the master toggle destroys combinators.
 
-### Copy and Paste
+## Copy and Paste
 
 Segments and panels can be copied and pasted:
 
@@ -77,7 +77,7 @@ Segments and panels can be copied and pasted:
 
 ## Recipes
 
-All panels require raw combinator ingredients in addition to the base display panel ingredients. Recipes are unlocked alongside the vanilla display panel via circuit network research.
+All panels require raw combinator ingredients in addition to the base display panel ingredients.
 
 | Panel | Iron plate | Electronic circuit | Copper wire |
 |-------|------------|-------------------|-------------|
