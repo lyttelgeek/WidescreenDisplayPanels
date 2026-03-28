@@ -107,4 +107,4 @@ All widescreen panels are unlocked alongside the vanilla display panel via circu
 
 ## Current Version
 
-[1.2.0 - Smartscreen Update]( )
+[1.2.0 - Smartscreen Update](https://github.com/lyttelgeek/WidescreenDisplayPanels/releases/tag/1.2.0-Smartscreen_Update)
