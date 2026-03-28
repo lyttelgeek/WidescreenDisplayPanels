@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.2.0 - Smartscreen Update
+
+### Features
+- Added smart logic system per segment:
+  - Enable via the "Enable smart logic" toggle in the segment GUI
+  - **Arithmetic A → Arithmetic B pipeline**: two chained arithmetic combinators; enabling Arithmetic B unlocks Arithmetic A for upstream pre-processing
+  - **Decider combinator**: independent of the arithmetic pipeline; output merges with arithmetic result (decider wins on collision)
+  - Signal flow: panel input → Arithmetic A → Arithmetic B → segment display rules
+  - Smart combinators open their native Factorio GUI for full configuration
+  - Combinator configuration is preserved when toggling on/off
+
+### UI
+- Signal bar now shows red and green wire signals in separate rows
+- Signal bar uses vanilla-style scrollbar; expands to 4 rows before scrolling
+- Smart logic master toggle no longer affects signal bar display; only active sub-combinators do
+
+### Recipes
+- All panels now include 3 combinator sets (arithmetic, decider, constant) per segment in their recipe:
+  - 2×1 / 1×2: 2 iron plate, 32 electronic circuit, 30 copper wire
+  - 3×1 / 1×3: 3 iron plate, 48 electronic circuit, 45 copper wire
+  - 4×1 / 1×4: 4 iron plate, 64 electronic circuit, 60 copper wire
+
+### Fixes
+- Fixed smart combinator wire connection triangles appearing on the main surface
+- Fixed smart feeder only connecting via red wire (green was ignored)
+- Fixed signal bar merging red and green onto green when smart master was toggled
+
+---
+
 ## 1.1.0 - Tallscreen Update
 
 ### Features

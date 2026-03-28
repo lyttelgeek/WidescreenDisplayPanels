@@ -1,15 +1,7 @@
 # Widescreen Display Panels
 
-<p align="center">
-  <img src="thumbnail.png" alt="Panels"/>
- </p>
-<p align="left">
 Adds 2x1, 3x1, and 4x1 widescreen and tallscreen variants of the vanilla display panel, designed for cleaner dashboards and improved readability/organisation in circuit network setups.
-</p>
-<p align="center">
-  <img src="thumbnail2.png" alt="Update"/>
- </p>
- 
+
 ## Features
 
 - Three new panel sizes in two orientations:
@@ -33,6 +25,8 @@ Adds 2x1, 3x1, and 4x1 widescreen and tallscreen variants of the vanilla display
   - Optional alt-mode visibility
   - Optional chart tag display
 
+- Smart logic per segment (arithmetic and decider combinators)
+
 - Copy and paste segment configurations between panels
 
 ## Integration
@@ -41,7 +35,7 @@ Adds 2x1, 3x1, and 4x1 widescreen and tallscreen variants of the vanilla display
 
 ## Usage
 
-Each panel is divided into segments depending on its length. Each segment behaves as a single vanilla panel:
+Each panel is divided into horizontal segments depending on its width. Each segment behaves as a single vanilla panel:
 
 - Evaluates rules in order
 - Displays the first matching rule
@@ -51,10 +45,22 @@ Each panel is divided into segments depending on its length. Each segment behave
 
 ### Wiring
 
-- The **top** and **left side** of the panel functions as the circuit input on the **vertical** and **horizontal screens** respectively.
+- The **top** and **left side** of the panel functions as the circuit input on the vertical and horizontals screens respectively.
 - Likewise the **bottom** and **right side** uses an invisible connector that outputs the merged signals
 
-This allows panels to act as both display and passthrough components in circuit networks. 
+This allows panels to act as both display and passthrough components in circuit networks.
+
+### Smart Logic
+
+Each segment has an optional smart logic system, accessible via the segment GUI. This allows signals to be transformed by combinators before being evaluated against display rules.
+
+**Signal flow:** panel input → Arithmetic A → Arithmetic B → display rules
+
+- **Arithmetic B**: enables the arithmetic combinator stage. When checked, signals pass through the arithmetic combinator before reaching the segment's display rules.
+- **Arithmetic A**: unlocked when Arithmetic B is enabled. Provides an upstream pre-processing stage; its output feeds into Arithmetic B.
+- **Decider**: independent of the arithmetic pipeline. Its output merges with the Arithmetic B result, with the decider winning on signal collision.
+
+Clicking the combinator icon button opens the native Factorio combinator GUI for full configuration. Combinator configuration is preserved when toggling on/off — only the master toggle destroys combinators.
 
 ### Copy and Paste
 
@@ -63,10 +69,19 @@ Segments can be copied and pasted:
 - Copy a configured segment
 - Paste onto another segment or panel
 
+## Recipes
+
+All panels require combinators in addition to the base display panel ingredients. Recipes are unlocked alongside the vanilla display panel via circuit network research.
+
+| Panel | Iron plate | Electronic circuit | Copper wire |
+|-------|------------|-------------------|-------------|
+| 2×1 / 1×2 | 2 | 32 | 30 |
+| 3×1 / 1×3 | 3 | 48 | 45 |
+| 4×1 / 1×4 | 4 | 64 | 60 |
+
 ## Unlocking
 
-All widescreen panels are unlocked alongside the vanilla display panel via circuit network research. 
-They use the vanilla panel recipe multiplied by the panel's length.
+All widescreen panels are unlocked alongside the vanilla display panel via circuit network research.
 
 ## Notes
 
@@ -83,12 +98,3 @@ They use the vanilla panel recipe multiplied by the panel's length.
 
 - No direct copy/paste from vanilla display panels
 - Panels are fixed orientation (no flipping/rotating)
-
-## Future plans
-
-- Additional quality-of-life improvements/tweaks
-
-## Current Version
-
-[1.1.0 Tallscreen Update](https://github.com/lyttelgeek/WidescreenDisplayPanels/releases/tag/1.1.0-Tallscreen_Update) 
-

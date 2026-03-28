@@ -1,4 +1,29 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.2.0
+---------------------------------------------------------------------------------------------------
+
+Features:
+  - Added smart logic system per segment (enable via "Enable smart logic" in the segment GUI)
+  - Arithmetic B: arithmetic combinator stage; signals pass through before reaching display rules
+  - Arithmetic A: upstream pre-processing stage feeding into Arithmetic B (unlocked by Arithmetic B)
+  - Decider: independent combinator; output merges with Arithmetic B result (decider wins on collision)
+  - Signal flow: panel input -> Arithmetic A -> Arithmetic B -> display rules
+  - Combinator configuration is preserved when toggling on/off
+
+UI:
+  - Signal bar now shows red and green wire signals in separate rows
+  - Signal bar uses vanilla-style scrollbar; expands to 4 rows before scrolling
+  - Smart logic master toggle no longer affects signal bar display
+
+Recipes:
+  - All panels now include 3 combinator sets (arithmetic, decider, constant) per segment
+
+Fixes:
+  - Fixed smart combinator wire connection triangles appearing on the main surface
+  - Fixed smart feeder only connecting via red wire (green was ignored)
+  - Fixed signal bar merging red and green onto green when smart master was toggled
+
+---------------------------------------------------------------------------------------------------
 Version: 1.1.0
 ---------------------------------------------------------------------------------------------------
 

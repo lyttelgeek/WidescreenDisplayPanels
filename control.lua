@@ -103,7 +103,7 @@ end
   - Merge panel circuit-network signals and mirror them to the hidden helper port
   - Evaluate per-segment rule stacks and render icon/message output
   - Provide chart-tag, hover-preview, and GUI editing behaviour
-  - Expose merged signals for Display Signal Counts compatibility
+  - Expose merged signals for Signal Display compatibility
 ]]
 
 local function ensure_global()
@@ -130,11 +130,190 @@ local function ensure_global()
   global.wdp.chart_tags = global.wdp.chart_tags or {}
   global.wdp.chart_tag_hash = global.wdp.chart_tag_hash or {}
   global.wdp.hover_render_objects = global.wdp.hover_render_objects or {}
+
+  ------------------------------------------------------------
+  -- Smart combinator registry
+  ------------------------------------------------------------
+  global.wdp.smart = global.wdp.smart or {}
+  global.wdp.smart.combinators = global.wdp.smart.combinators or {}
 end
 
 ------------------------------------------------------------
+-- Hidden surface for internal entities (feeders, smart
+-- combinators). Spawning them here keeps their wire
+-- connection triangles off the player's surfaces entirely.
+------------------------------------------------------------
+local HIDDEN_SURFACE_NAME = "wdp-hidden"
+
+local function get_or_create_hidden_surface()
+  local s = game.get_surface(HIDDEN_SURFACE_NAME)
+  if s then return s end
+  return game.create_surface(HIDDEN_SURFACE_NAME, {
+    width = 1, height = 1,
+    default_enable_all_natural_resources = false,
+    starting_points = {},
+    autoplace_controls = {},
+  })
+end
+------------------------------------------------------------
 -- Entity / panel helpers
 ------------------------------------------------------------
+
+------------------------------------------------------------
+-- Smart combinator helpers
+------------------------------------------------------------
+
+local function get_smart_combinator_name(kind)
+  if kind == "arithmetic_a" or kind == "arithmetic_b" then
+    return "wdp-smart-arithmetic"
+  elseif kind == "decider" then
+    return "wdp-smart-decider"
+  end
+  return nil
+end
+
+
+local function get_registered_smart_combinator(unit_number)
+  ensure_global()
+  if not unit_number then return nil end
+
+  local entry = global.wdp.smart.combinators[unit_number]
+  if not entry then return nil end
+
+  local ent = entry.entity
+  if not (ent and ent.valid) then
+    global.wdp.smart.combinators[unit_number] = nil
+    return nil
+  end
+
+  return ent
+end
+
+
+local function register_smart_combinator(ent, panel, seg_index, kind)
+  ensure_global()
+  if not (ent and ent.valid and ent.unit_number) then return end
+  if not (panel and panel.valid and panel.unit_number) then return end
+
+  global.wdp.smart.combinators[ent.unit_number] = {
+    entity = ent,
+    panel_unit_number = panel.unit_number,
+    segment_index = seg_index,
+    kind = kind
+  }
+end
+
+
+local function unregister_smart_combinator(unit_number)
+  ensure_global()
+  if not unit_number then return end
+  global.wdp.smart.combinators[unit_number] = nil
+end
+
+
+local function destroy_smart_combinator_by_unit_number(unit_number)
+  ensure_global()
+  local entry = global.wdp.smart.combinators[unit_number]
+  if entry then
+    if entry.red_feeder   and entry.red_feeder.valid   then entry.red_feeder.destroy()   end
+    if entry.green_feeder and entry.green_feeder.valid then entry.green_feeder.destroy() end
+    if entry.entity       and entry.entity.valid       then entry.entity.destroy()       end
+  end
+  unregister_smart_combinator(unit_number)
+end
+
+
+local function create_smart_combinator(panel, seg_index, kind)
+  ensure_global()
+  if not (panel and panel.valid and panel.surface and panel.force) then return nil end
+
+  local name = get_smart_combinator_name(kind)
+  if not name then return nil end
+
+  local hidden_surface = get_or_create_hidden_surface()
+  if not hidden_surface then return nil end
+
+  local ent = hidden_surface.create_entity{
+    name = name,
+    position = { panel.position.x + 0.1, panel.position.y + 0.1 },
+    force = panel.force,
+    create_build_effect_smoke = false
+  }
+
+  if not (ent and ent.valid and ent.unit_number) then return nil end
+
+------------------------------------------------------------
+-- Spawn two hidden constant combinator feeders -- one for
+-- red signals, one for green -- and wire each to the
+-- corresponding input connector of the smart combinator.
+--
+-- A constant combinator emits its signals on both wires
+-- simultaneously, so separate entities are required to preserve
+-- the red/green split the player wired to the panel.
+-- Neither feeder is connected to the player's network.
+------------------------------------------------------------
+  local function make_feeder(offset_x, offset_y, feeder_wire_id, comb_connector_id)
+    local f = hidden_surface.create_entity{
+      name = "wdp-smart-feeder",
+      position = { panel.position.x + offset_x, panel.position.y + offset_y },
+      force = panel.force,
+      create_build_effect_smoke = false,
+    }
+    if not (f and f.valid) then return nil end
+    f.destructible = false
+    f.minable      = false
+    f.rotatable    = false
+    f.operable     = false
+
+    -- Wire feeder output -> combinator input connector (colour-matched).
+    local f_out = f.get_wire_connector(feeder_wire_id, true)
+    local c_in  = ent.get_wire_connector(comb_connector_id, true)
+    if f_out and c_in then
+      f_out.connect_to(c_in, false, defines.wire_origin.script)
+    end
+    return f
+  end
+
+  local red_feeder   = make_feeder(0.2, 0.2, defines.wire_connector_id.circuit_red,   defines.wire_connector_id.combinator_input_red)
+  local green_feeder = make_feeder(0.3, 0.3, defines.wire_connector_id.circuit_green, defines.wire_connector_id.combinator_input_green)
+
+  ent.destructible = false
+  ent.minable = false
+  ent.rotatable = false
+  ent.operable = true
+
+  register_smart_combinator(ent, panel, seg_index, kind)
+
+  -- Store both feeders in the registry entry.
+  local entry = global.wdp.smart.combinators[ent.unit_number]
+  if entry then
+    entry.red_feeder   = red_feeder
+    entry.green_feeder = green_feeder
+  end
+
+  return ent
+end
+
+local function get_segment_smart_ref(seg, kind)
+  if not seg then return nil end
+  if not seg.smart then return nil end
+  if not seg.smart[kind] then return nil end
+  return seg.smart[kind].entity_unit_number
+end
+
+local function set_segment_smart_ref(seg, kind, unit_number)
+  if not seg.smart then seg.smart = {} end
+  if not seg.smart[kind] then seg.smart[kind] = {} end
+  seg.smart[kind].entity_unit_number = unit_number
+end
+
+local function destroy_segment_smart_combinator(seg, kind)
+  local ref = get_segment_smart_ref(seg, kind)
+  if ref then
+    destroy_smart_combinator_by_unit_number(ref)
+    set_segment_smart_ref(seg, kind, nil)
+  end
+end
 
 local function is_panel(e)
   return e and e.valid and PANEL_SPECS[e.name] ~= nil
@@ -366,6 +545,45 @@ local function ensure_panel_segment_data(panel)
     if seg.show_in_chart == nil then
       seg.show_in_chart = false
     end
+
+    ------------------------------------------------------------
+    -- Smart logic data model
+    ------------------------------------------------------------
+    seg.smart = seg.smart or {}
+
+    if seg.smart.enabled == nil then
+      seg.smart.enabled = false
+    end
+
+    -- Migrate legacy "arithmetic" slot to "arithmetic_b"
+    if seg.smart.arithmetic and not seg.smart.arithmetic_b then
+      seg.smart.arithmetic_b = seg.smart.arithmetic
+      seg.smart.arithmetic = nil
+    end
+
+    seg.smart.arithmetic_a = seg.smart.arithmetic_a or {}
+    if seg.smart.arithmetic_a.enabled == nil then
+      seg.smart.arithmetic_a.enabled = false
+    end
+    if seg.smart.arithmetic_a.entity_unit_number == nil then
+      seg.smart.arithmetic_a.entity_unit_number = nil
+    end
+
+    seg.smart.arithmetic_b = seg.smart.arithmetic_b or {}
+    if seg.smart.arithmetic_b.enabled == nil then
+      seg.smart.arithmetic_b.enabled = false
+    end
+    if seg.smart.arithmetic_b.entity_unit_number == nil then
+      seg.smart.arithmetic_b.entity_unit_number = nil
+    end
+
+    seg.smart.decider = seg.smart.decider or {}
+    if seg.smart.decider.enabled == nil then
+      seg.smart.decider.enabled = false
+    end
+    if seg.smart.decider.entity_unit_number == nil then
+      seg.smart.decider.entity_unit_number = nil
+    end
   end
 
   for i = wanted + 1, #data.segments do
@@ -565,6 +783,29 @@ local function get_panel_by_unit(unit_number)
   return nil
 end
 
+------------------------------------------------------------
+-- Destroy every smart combinator that belongs to a panel,
+-- working from the segment data.  Call this BEFORE clearing
+-- segment_data so the entity_unit_numbers are still valid.
+------------------------------------------------------------
+local function destroy_all_panel_smart_combinators(unit_number)
+  local segdata = global.wdp.segment_data[unit_number]
+  if not segdata or not segdata.segments then return end
+
+  for _, seg in ipairs(segdata.segments) do
+    if seg.smart then
+      for _, kind in ipairs({ "arithmetic_a", "arithmetic_b", "decider" }) do
+        local ref = seg.smart[kind]
+                    and seg.smart[kind].entity_unit_number
+        if ref then
+          destroy_smart_combinator_by_unit_number(ref)
+          seg.smart[kind].entity_unit_number = nil
+        end
+      end
+    end
+  end
+end
+
 local function detach_ports_by_unit(unit_number, keep_settings)
   ensure_global()
 
@@ -580,6 +821,10 @@ local function detach_ports_by_unit(unit_number, keep_settings)
   global.wdp.panels[unit_number] = nil
   global.wdp.cache[unit_number] = nil
   global.wdp.last_output_hash[unit_number] = nil
+
+  -- Always destroy smart combinators regardless of keep_settings,
+  -- since the entities themselves must not outlive the panel.
+  destroy_all_panel_smart_combinators(unit_number)
 
   if not keep_settings then
     global.wdp.settings[unit_number] = nil
@@ -626,6 +871,21 @@ local function make_ports_for_panel(panel)
   if not (output and output.valid) then
     destroy_if_valid(output)
     return nil
+  end
+
+  -- Wire the port to the panel on both colours so downstream entities
+  -- wired to the port share the panel's input network directly.
+  -- Replaces write_const; direct port wiring avoids signal doubling.
+  local port_red  = output.get_wire_connector(defines.wire_connector_id.circuit_red,  true)
+  local panel_red = panel.get_wire_connector(defines.wire_connector_id.circuit_red,   true)
+  if port_red and panel_red then
+    port_red.connect_to(panel_red, false, defines.wire_origin.script)
+  end
+
+  local port_green  = output.get_wire_connector(defines.wire_connector_id.circuit_green, true)
+  local panel_green = panel.get_wire_connector(defines.wire_connector_id.circuit_green,  true)
+  if port_green and panel_green then
+    port_green.connect_to(panel_green, false, defines.wire_origin.script)
   end
 
   return { output = output }
@@ -675,7 +935,36 @@ local function ensure_panel_runtime(panel)
   local ports = global.wdp.ports[unit]
   if not ports or not ports.output or not ports.output.valid then
     attach_ports(panel)
-    return true
+  end
+
+  ------------------------------------------------------------
+  -- Reconcile smart combinators: after a config change (or
+  -- any other scenario where the entities were lost but the
+  -- segment data still marks them as enabled) missing combinators
+  -- are re-spawned so the refs stay valid.
+  ------------------------------------------------------------
+  local segdata = global.wdp.segment_data[unit]
+  if segdata and segdata.segments then
+    for seg_idx, seg in ipairs(segdata.segments) do
+      if seg.smart and seg.smart.enabled then
+        for _, kind in ipairs({ "arithmetic_a", "arithmetic_b", "decider" }) do
+          local smart_slot = seg.smart[kind]
+          if smart_slot and smart_slot.enabled then
+            local ref = smart_slot.entity_unit_number
+            local ent = ref and get_registered_smart_combinator(ref) or nil
+            if not ent then
+              -- Entity is missing -- respawn it.
+              ent = create_smart_combinator(panel, seg_idx, kind)
+              if ent and ent.valid then
+                smart_slot.entity_unit_number = ent.unit_number
+              else
+                smart_slot.entity_unit_number = nil
+              end
+            end
+          end
+        end
+      end
+    end
   end
 
   return true
@@ -796,14 +1085,8 @@ local function sprite_namespace_for_signal(sig)
 end
 
 local function sprite_path_from_signal(sig)
-  if sig then
-    log("WDP sprite_path_from_signal type=" .. tostring(sig.type) .. " name=" .. tostring(sig.name))
-  end
   local ns = sprite_namespace_for_signal(sig)
-  if not ns then
-    log("WDP sprite namespace nil for type=" .. tostring(sig and sig.type))
-    return nil
-  end
+  if not ns then return nil end
   return ns .. "/" .. sig.name
 end
 
@@ -889,67 +1172,61 @@ local function evaluate_segment_rules(seg_cfg, merged_tbl)
   return nil
 end
 
-local function make_render_hash(seg_cfg, merged_tbl)
-  local match = evaluate_segment_rules(seg_cfg, merged_tbl)
+-- Core hash builder: takes an already-evaluated match (or nil).
+-- Avoids re-running evaluate_segment_rules when the caller already has it.
+local function make_render_hash_from_match(seg_cfg, match)
   if not match then return "hidden" end
 
   local rule = match.rule
   local rhs_sig_key = signal_key_from_signal(rule.rhs and rule.rhs.signal) or "nil"
-  local icon_key = signal_key_from_signal(rule.icon_signal) or "nil"
-  local first_key = signal_key_from_signal(rule.first_signal) or "nil"
+  local icon_key    = signal_key_from_signal(rule.icon_signal)              or "nil"
+  local first_key   = signal_key_from_signal(rule.first_signal)             or "nil"
 
   return table.concat({
-    "rule=" .. tostring(match.rule_index),
-    "lhs=" .. tostring(match.lhs_value),
-    "rhs=" .. tostring(match.rhs_value),
+    "rule="     .. tostring(match.rule_index),
+    "lhs="      .. tostring(match.lhs_value),
+    "rhs="      .. tostring(match.rhs_value),
     "rhs_kind=" .. tostring(rule.rhs and rule.rhs.kind or "constant"),
-    "rhs_sig=" .. rhs_sig_key,
-    "icon=" .. icon_key,
-    "first=" .. first_key,
-    "op=" .. tostring(rule.comparator or ">"),
-    "msg=" .. tostring(rule.message or ""),
-    "alt=" .. tostring(seg_cfg and seg_cfg.show_in_alt_mode == true),
+    "rhs_sig="  .. rhs_sig_key,
+    "icon="     .. icon_key,
+    "first="    .. first_key,
+    "op="       .. tostring(rule.comparator or ">"),
+    "msg="      .. tostring(rule.message or ""),
+    "alt="      .. tostring(seg_cfg and seg_cfg.show_in_alt_mode == true),
   }, "|")
+end
+
+-- Convenience wrapper for callers that don't have a pre-computed match
+-- (used by the hover-render path).
+local function make_render_hash(seg_cfg, merged_tbl)
+  local match = evaluate_segment_rules(seg_cfg, merged_tbl)
+  return make_render_hash_from_match(seg_cfg, match)
 end
 
 local function get_panel_networks(panel)
   local networks = {}
   local ids = {}
 
-  local behavior = panel.get_or_create_control_behavior()
-  if behavior then
-    local ok_r, net_r = pcall(function()
-      return behavior.get_circuit_network(defines.wire_connector_id.circuit_red)
-    end)
-    if ok_r and net_r and net_r.valid and net_r.network_id ~= nil and not ids[net_r.network_id] then
-      ids[net_r.network_id] = true
-      networks[#networks + 1] = net_r
-    end
-
-    local ok_g, net_g = pcall(function()
-      return behavior.get_circuit_network(defines.wire_connector_id.circuit_green)
-    end)
-    if ok_g and net_g and net_g.valid and net_g.network_id ~= nil and not ids[net_g.network_id] then
-      ids[net_g.network_id] = true
-      networks[#networks + 1] = net_g
+  local function try_add(net)
+    if net and net.valid and net.network_id ~= nil
+        and not ids[net.network_id] then
+      ids[net.network_id] = true
+      networks[#networks + 1] = net
     end
   end
 
-  local ok_er, ent_r = pcall(function()
+  -- Use entity-direct API only (Factorio 2.0).
+  -- The old behavior.get_circuit_network path can return a different
+  -- network object for the same connector, causing double-counting.
+  local ok_r, net_r = pcall(function()
     return panel.get_circuit_network(defines.wire_connector_id.circuit_red)
   end)
-  if ok_er and ent_r and ent_r.valid and ent_r.network_id ~= nil and not ids[ent_r.network_id] then
-    ids[ent_r.network_id] = true
-    networks[#networks + 1] = ent_r
-  end
+  if ok_r then try_add(net_r) end
 
-  local ok_eg, ent_g = pcall(function()
+  local ok_g, net_g = pcall(function()
     return panel.get_circuit_network(defines.wire_connector_id.circuit_green)
   end)
-  if ok_eg and ent_g and ent_g.valid and ent_g.network_id ~= nil and not ids[ent_g.network_id] then
-    ids[ent_g.network_id] = true
-    networks[#networks + 1] = ent_g
-  end
+  if ok_g then try_add(net_g) end
 
   return networks
 end
@@ -965,16 +1242,105 @@ local function read_networks_to_table(networks)
   return merged_tbl
 end
 
+------------------------------------------------------------
+-- Read all circuit-network signals visible to a panel and
+-- return them as both a flat key->count table and an array.
+------------------------------------------------------------
 local function compute_merged_for_panel(panel)
   if not (panel and panel.valid and panel.unit_number) then
     return {}, {}
   end
-
-  local networks = get_panel_networks(panel)
+  local networks   = get_panel_networks(panel)
   local merged_tbl = read_networks_to_table(networks)
   local merged_arr = table_to_signal_array(merged_tbl)
-
   return merged_tbl, merged_arr
+end
+
+------------------------------------------------------------
+-- Read a smart combinator's computed output into a flat
+-- key->count table.
+--
+-- Using signals_last_tick from LuaCombinatorControlBehavior
+-- which gives the signals the combinator *output* last tick
+-- directly, no need to read a circuit network at all.
+------------------------------------------------------------
+local function read_combinator_output_to_table(ent)
+  local out = {}
+  if not (ent and ent.valid) then return out end
+
+  local ok, cb = pcall(function()
+    return ent.get_or_create_control_behavior()
+  end)
+  if not ok or not cb then return out end
+
+  local ok2, signals = pcall(function()
+    return cb.signals_last_tick
+  end)
+  if not ok2 or not signals then return out end
+
+  add_signals(out, signals)
+  return out
+end
+
+------------------------------------------------------------
+-- Merge two flat key->count tables.
+-- high_tbl wins on key collision (decider > arithmetic).
+------------------------------------------------------------
+local function merge_signal_tables_with_priority(low_tbl, high_tbl)
+  local out = {}
+  for k, v in pairs(low_tbl  or {}) do out[k] = v end
+  for k, v in pairs(high_tbl or {}) do out[k] = v end
+  return out
+end
+
+------------------------------------------------------------
+-- Compute the effective signal table for a single segment.
+-- Signal flow:
+--   panel input -> arithmetic_a -> arithmetic_b -> segment
+--   decider is independent, merges with arithmetic_b output
+--   (decider wins on collision).
+-- Falls back to raw panel input if nothing produces output.
+------------------------------------------------------------
+local function compute_smart_output_for_segment(panel, seg)
+  local raw_tbl, raw_arr = compute_merged_for_panel(panel)
+
+  if not (seg and seg.smart and seg.smart.enabled) then
+    return raw_tbl, raw_arr
+  end
+
+  -- arithmetic_b reads from arithmetic_a output (if arithmetic_a enabled),
+  -- otherwise reads raw panel input via its feeders.
+  local arithmetic_b_tbl = {}
+  if seg.smart.arithmetic_b
+      and seg.smart.arithmetic_b.enabled
+      and seg.smart.arithmetic_b.entity_unit_number then
+    local ent = get_registered_smart_combinator(
+                  seg.smart.arithmetic_b.entity_unit_number)
+    if ent and ent.valid then
+      arithmetic_b_tbl = read_combinator_output_to_table(ent)
+    end
+  end
+
+  local decider_tbl = {}
+  if seg.smart.decider
+      and seg.smart.decider.enabled
+      and seg.smart.decider.entity_unit_number then
+    local ent = get_registered_smart_combinator(
+                  seg.smart.decider.entity_unit_number)
+    if ent and ent.valid then
+      decider_tbl = read_combinator_output_to_table(ent)
+    end
+  end
+
+  -- Merge arithmetic_b and decider; decider wins on collision.
+  local merged_tbl = merge_signal_tables_with_priority(arithmetic_b_tbl, decider_tbl)
+
+  -- Fall back to raw panel input if nothing produced output.
+  if next(merged_tbl) == nil then
+    return raw_tbl, raw_arr
+  end
+
+  return merged_tbl, table_to_signal_array(merged_tbl)
 end
 
 ------------------------------------------------------------
@@ -1116,38 +1482,21 @@ local function update_panel_chart_tag(panel, panel_unit, merged_tbl)
 end
 
 local function get_network_ids_by_color(panel)
-  local red_id = nil
+  local red_id   = nil
   local green_id = nil
 
-  local behavior = panel.get_or_create_control_behavior()
-  if behavior then
-    local ok_r, net_r = pcall(function()
-      return behavior.get_circuit_network(defines.wire_connector_id.circuit_red)
-    end)
-    if ok_r and net_r and net_r.valid and net_r.network_id ~= nil then
-      red_id = net_r.network_id
-    end
-
-    local ok_g, net_g = pcall(function()
-      return behavior.get_circuit_network(defines.wire_connector_id.circuit_green)
-    end)
-    if ok_g and net_g and net_g.valid and net_g.network_id ~= nil then
-      green_id = net_g.network_id
-    end
-  end
-
-  local ok_er, ent_r = pcall(function()
+  local ok_r, net_r = pcall(function()
     return panel.get_circuit_network(defines.wire_connector_id.circuit_red)
   end)
-  if ok_er and ent_r and ent_r.valid and ent_r.network_id ~= nil and red_id == nil then
-    red_id = ent_r.network_id
+  if ok_r and net_r and net_r.valid and net_r.network_id ~= nil then
+    red_id = net_r.network_id
   end
 
-  local ok_eg, ent_g = pcall(function()
+  local ok_g, net_g = pcall(function()
     return panel.get_circuit_network(defines.wire_connector_id.circuit_green)
   end)
-  if ok_eg and ent_g and ent_g.valid and ent_g.network_id ~= nil and green_id == nil then
-    green_id = ent_g.network_id
+  if ok_g and net_g and net_g.valid and net_g.network_id ~= nil then
+    green_id = net_g.network_id
   end
 
   return red_id, green_id
@@ -1227,17 +1576,36 @@ local function ensure_render_bucket(panel_unit)
   return global.wdp.render_objects[panel_unit], global.wdp.last_render_hash[panel_unit]
 end
 
-local function render_segment(panel, panel_unit, seg_idx, seg_cfg, merged_tbl, segment_count)
+-- smart_tbl_cache: optional table[seg_idx] -> pre-computed effective signal
+-- table for smart segments.  Built once per tick in update_panel_render and
+-- passed down to avoid re-reading combinator outputs per segment.
+local function render_segment(panel, panel_unit, seg_idx, seg_cfg, merged_tbl, segment_count, smart_tbl_cache)
   local bucket, hash_bucket = ensure_render_bucket(panel_unit)
 
-  local new_hash = make_render_hash(seg_cfg or {}, merged_tbl)
+  ------------------------------------------------------------
+  -- Resolve effective signal table for this segment.
+  -- Use the pre-computed cache entry when available, otherwise
+  -- fall back to computing it now (e.g. direct calls outside
+  -- the tick loop).
+  ------------------------------------------------------------
+  local effective_tbl
+  if smart_tbl_cache and smart_tbl_cache[seg_idx] then
+    effective_tbl = smart_tbl_cache[seg_idx]
+  elseif seg_cfg and seg_cfg.smart and seg_cfg.smart.enabled then
+    effective_tbl = select(1, compute_smart_output_for_segment(panel, seg_cfg))
+  else
+    effective_tbl = merged_tbl
+  end
+
+  -- Evaluate rules once; reuse result for both hash and render.
+  local match    = evaluate_segment_rules(seg_cfg, effective_tbl)
+  local new_hash = make_render_hash_from_match(seg_cfg or {}, match)
   local old_hash = hash_bucket[seg_idx]
 
   if new_hash == old_hash then return end
 
   clear_segment_render(panel_unit, seg_idx)
 
-  local match = evaluate_segment_rules(seg_cfg, merged_tbl)
   if not match then
     hash_bucket[seg_idx] = new_hash
     return
@@ -1457,8 +1825,21 @@ local function update_panel_render(panel, panel_unit, merged_tbl)
     return
   end
 
+  ------------------------------------------------------------
+  -- Build smart output cache: one combinator read per enabled
+  -- segment, shared across this entire render pass.
+  ------------------------------------------------------------
+  local smart_tbl_cache = nil
   for seg_idx = 1, pdata.segment_count do
-    render_segment(panel, panel_unit, seg_idx, pdata.segments[seg_idx], merged_tbl, pdata.segment_count)
+    local seg = pdata.segments[seg_idx]
+    if seg and seg.smart and seg.smart.enabled then
+      smart_tbl_cache = smart_tbl_cache or {}
+      smart_tbl_cache[seg_idx] = select(1, compute_smart_output_for_segment(panel, seg))
+    end
+  end
+
+  for seg_idx = 1, pdata.segment_count do
+    render_segment(panel, panel_unit, seg_idx, pdata.segments[seg_idx], merged_tbl, pdata.segment_count, smart_tbl_cache)
   end
 
   local bucket = global.wdp.render_objects[panel_unit]
@@ -1474,6 +1855,90 @@ end
 -- Core mirror / update loop
 ------------------------------------------------------------
 
+------------------------------------------------------------
+-- Update smart combinator feeders for a panel.
+-- Called each tick so combinators always see current signals.
+------------------------------------------------------------
+local function update_smart_feeders_for_panel(panel, panel_unit)
+  ensure_global()
+  local segdata = global.wdp.segment_data[panel_unit]
+  if not segdata or not segdata.segments then return end
+
+  local function read_net(connector_id)
+    local t = {}
+    local ok, net = pcall(function()
+      return panel.get_circuit_network(connector_id)
+    end)
+    if ok and net and net.valid and net.signals then
+      add_signals(t, net.signals)
+    end
+    return t
+  end
+
+  local red_tbl   = read_net(defines.wire_connector_id.circuit_red)
+  local green_tbl = read_net(defines.wire_connector_id.circuit_green)
+
+  for _, seg in ipairs(segdata.segments) do
+    if seg.smart and seg.smart.enabled then
+
+      -- arithmetic_a: fed by raw panel input (red/green split)
+      local slot_a = seg.smart.arithmetic_a
+      if slot_a and slot_a.enabled and slot_a.entity_unit_number then
+        local entry = global.wdp.smart.combinators[slot_a.entity_unit_number]
+        if entry then
+          if entry.red_feeder   and entry.red_feeder.valid   then
+            write_const(entry.red_feeder,   red_tbl)
+          end
+          if entry.green_feeder and entry.green_feeder.valid then
+            write_const(entry.green_feeder, green_tbl)
+          end
+        end
+      end
+
+      -- arithmetic_b: fed by arithmetic_a output if enabled, else raw panel input
+      local slot_b = seg.smart.arithmetic_b
+      if slot_b and slot_b.enabled and slot_b.entity_unit_number then
+        local entry = global.wdp.smart.combinators[slot_b.entity_unit_number]
+        if entry then
+          local feed_tbl
+          if slot_a and slot_a.enabled and slot_a.entity_unit_number then
+            local ent_a = get_registered_smart_combinator(slot_a.entity_unit_number)
+            if ent_a and ent_a.valid then
+              feed_tbl = read_combinator_output_to_table(ent_a)
+            end
+          end
+          feed_tbl = feed_tbl or {}
+          -- Fall back to raw panel input if arithmetic_a produced nothing
+          if next(feed_tbl) == nil then
+            feed_tbl = nil  -- signal: use raw split below
+          end
+          if entry.red_feeder and entry.red_feeder.valid then
+            write_const(entry.red_feeder,   feed_tbl or red_tbl)
+          end
+          if entry.green_feeder and entry.green_feeder.valid then
+            write_const(entry.green_feeder, feed_tbl or green_tbl)
+          end
+        end
+      end
+
+      -- decider: always fed by raw panel input (independent)
+      local slot_d = seg.smart.decider
+      if slot_d and slot_d.enabled and slot_d.entity_unit_number then
+        local entry = global.wdp.smart.combinators[slot_d.entity_unit_number]
+        if entry then
+          if entry.red_feeder   and entry.red_feeder.valid   then
+            write_const(entry.red_feeder,   red_tbl)
+          end
+          if entry.green_feeder and entry.green_feeder.valid then
+            write_const(entry.green_feeder, green_tbl)
+          end
+        end
+      end
+
+    end
+  end
+end
+
 local function mirror_and_cache(panel_unit)
   ensure_global()
 
@@ -1485,31 +1950,43 @@ local function mirror_and_cache(panel_unit)
     clear_all_panel_render(panel_unit)
     clear_panel_chart_tag(panel_unit)
 
-    if ports and ports.output and ports.output.valid then
-      local prev_hash = global.wdp.last_output_hash[panel_unit]
-      if prev_hash ~= "" then
-        write_const(ports.output, {})
-        global.wdp.last_output_hash[panel_unit] = ""
-      end
-    end
     return
   end
 
   local merged_tbl, merged_arr = compute_merged_for_panel(panel)
   global.wdp.cache[panel_unit] = merged_arr
 
+  update_smart_feeders_for_panel(panel, panel_unit)
   update_panel_render(panel, panel_unit, merged_tbl)
   update_panel_chart_tag(panel, panel_unit, merged_tbl)
-
-  if not ports or not ports.output or not ports.output.valid then return end
-
-  local new_hash = hash_signal_table(merged_tbl)
-  local old_hash = global.wdp.last_output_hash[panel_unit]
-  if new_hash == old_hash then return end
-
-  write_const(ports.output, merged_tbl)
-  global.wdp.last_output_hash[panel_unit] = new_hash
 end
+
+------------------------------------------------------------
+-- Signal bar: rebuild (full) and tick-update (in-place)
+------------------------------------------------------------
+
+local function format_si_compact(n)
+  if not n then return "0" end
+  n = tonumber(n) or 0
+
+  local abs_n = math.abs(n)
+  local sign = (n < 0) and "-" or ""
+
+  if abs_n < 1000 then
+    return tostring(n)
+  elseif abs_n < 1000000 then
+    return string.format("%s%.1fk", sign, abs_n / 1000):gsub("%.0k", "k")
+  elseif abs_n < 1000000000 then
+    return string.format("%s%.1fM", sign, abs_n / 1000000):gsub("%.0M", "M")
+  elseif abs_n < 1000000000000 then
+    return string.format("%s%.1fG", sign, abs_n / 1000000000):gsub("%.0G", "G")
+  else
+    return string.format("%s%.1fT", sign, abs_n / 1000000000000):gsub("%.0T", "T")
+  end
+end
+local tick_update_gui_signal_bars    -- defined after get_gui_state
+local tick_update_signal_bar         -- defined after get_gui_state
+local rebuild_signal_bar             -- defined after get_gui_state
 
 local function tick_merge()
   ensure_global()
@@ -1519,6 +1996,7 @@ local function tick_merge()
 
   for _, player in pairs(game.connected_players) do
     update_hover_render_for_player(player)
+    tick_update_gui_signal_bars(player)
   end
 end
 
@@ -1536,6 +2014,222 @@ local function get_panel_from_gui_state(state)
   return get_panel_by_unit(state.panel_unit)
 end
 
+-- Called each tick for every connected player.
+-- Updates the signal bar in-place if the player has the panel GUI open.
+tick_update_gui_signal_bars = function(player)
+  if not (player and player.valid) then return end
+  local state = get_gui_state(player.index)
+  if not state then return end
+  local panel = get_panel_from_gui_state(state)
+  if not (panel and panel.valid) then return end
+  local frame = player.gui.screen.wdp_main
+  if frame and frame.valid then
+    tick_update_signal_bar(frame, panel, player.index)
+  end
+end
+
+------------------------------------------------------------
+-- Signal bar functions
+-- (defined here so get_gui_state and get_panel_from_gui_state
+--  are already in scope)
+------------------------------------------------------------
+
+-- Returns red_tbl, green_tbl -- signal tables split by wire colour.
+-- When a sub-combinator is active and producing output, its result
+-- is returned on both wires (combinators output on both red and green).
+local function get_active_segment_signals_by_wire(panel, player_index)
+  local state = get_gui_state(player_index)
+
+  local seg = nil
+  if state then
+    local pdata = ensure_panel_segment_data(panel)
+    if pdata then
+      local seg_idx = math.max(1, math.min(state.active_tab or 1, pdata.segment_count))
+      seg = pdata.segments[seg_idx]
+    end
+  end
+
+  local function read_net(connector_id)
+    local t = {}
+    local ok, net = pcall(function()
+      return panel.get_circuit_network(connector_id)
+    end)
+    if ok and net and net.valid and net.signals then
+      add_signals(t, net.signals)
+    end
+    return t
+  end
+
+  -- If a sub-combinator is enabled and producing output, show that on
+  -- both wires (combinators output on both red and green).
+  -- The master toggle alone does not change signals -- only an enabled
+  -- sub-combinator with active output does.
+  local any_sub_enabled = seg and seg.smart and seg.smart.enabled and (
+    (seg.smart.arithmetic_a and seg.smart.arithmetic_a.enabled) or
+    (seg.smart.arithmetic_b and seg.smart.arithmetic_b.enabled) or
+    (seg.smart.decider      and seg.smart.decider.enabled)
+  )
+
+  if any_sub_enabled then
+    local smart_tbl = select(1, compute_smart_output_for_segment(panel, seg))
+    if smart_tbl and next(smart_tbl) ~= nil then
+      return smart_tbl, smart_tbl
+    end
+  end
+
+  -- Raw: red/green split from the panel input
+  return read_net(defines.wire_connector_id.circuit_red),
+         read_net(defines.wire_connector_id.circuit_green)
+end
+
+-- Helper: add a row of signal slots to a parent element.
+local function add_signal_row(parent, row_name, slot_style, entries)
+  if #entries == 0 then return end
+
+  local tbl = parent.add{
+    type = "table",
+    name = row_name,
+    column_count = 13,
+  }
+  tbl.style.horizontal_spacing = 0
+  tbl.style.vertical_spacing = 0
+
+  for _, entry in ipairs(entries) do
+    local typ, name, quality = entry.key:match("^([^:]+):([^:]+):?(.*)$")
+    typ     = normalize_signal_type_internal(typ)
+    quality = (quality ~= "" and quality or "normal")
+
+    local sprite_path = sprite_namespace_for_signal({ type = typ, name = name })
+    sprite_path = sprite_path and (sprite_path .. "/" .. name) or nil
+
+    parent[row_name].add{
+      type    = "sprite-button",
+      name    = "wdp_sigbar_" .. entry.key,
+      style   = slot_style,
+      sprite  = sprite_path,
+      tooltip = name .. ": " .. format_si_compact(entry.count),
+      number  = entry.count,
+    }
+  end
+end
+
+local function tbl_to_sorted_entries(t)
+  local entries = {}
+  for key, count in pairs(t) do
+    entries[#entries + 1] = { key = key, count = count }
+  end
+  table.sort(entries, function(a, b) return a.key < b.key end)
+  return entries
+end
+
+rebuild_signal_bar = function(frame, panel, player_index)
+  local holder = frame.wdp_signal_bar_holder
+  if not (holder and holder.valid) then return end
+  holder.clear()
+
+  local red_tbl, green_tbl = get_active_segment_signals_by_wire(panel, player_index)
+  local red_entries   = tbl_to_sorted_entries(red_tbl)
+  local green_entries = tbl_to_sorted_entries(green_tbl)
+
+  if #red_entries == 0 and #green_entries == 0 then
+    local lbl = holder.add{ type = "label", caption = "No signals" }
+    lbl.style.font_color = { 0.5, 0.5, 0.5 }
+    lbl.style.top_margin = 2
+    lbl.style.bottom_margin = 2
+    return
+  end
+
+  -- naked_scroll_pane with a vertical flow (vertical_spacing=0).
+  -- 4 rows × 30px per colour before scrolling.
+  local pane = holder.add{
+    type  = "scroll-pane",
+    name  = "wdp_signal_pane",
+    style = "naked_scroll_pane",
+    vertical_scroll_policy   = "auto",
+    horizontal_scroll_policy = "never",
+  }
+  pane.style.horizontally_stretchable = true
+  pane.style.maximal_height = 246  -- 4 rows × 30px × 2 colours + spacing
+
+  local inner = pane.add{
+    type      = "flow",
+    name      = "wdp_signal_inner",
+    direction = "vertical",
+  }
+  inner.style.vertical_spacing = 0
+
+  if #red_entries > 0 then
+    add_signal_row(inner, "wdp_red_row", "red_slot", red_entries)
+  end
+
+  if #green_entries > 0 then
+    add_signal_row(inner, "wdp_green_row", "green_slot", green_entries)
+  end
+end
+
+tick_update_signal_bar = function(frame, panel, player_index)
+  local holder = frame.wdp_signal_bar_holder
+  if not (holder and holder.valid) then return end
+
+  local pane = holder.wdp_signal_pane
+  if not (pane and pane.valid) then
+    rebuild_signal_bar(frame, panel, player_index)
+    return
+  end
+
+  local inner = pane.wdp_signal_inner
+  if not (inner and inner.valid) then
+    rebuild_signal_bar(frame, panel, player_index)
+    return
+  end
+
+  local red_tbl, green_tbl = get_active_segment_signals_by_wire(panel, player_index)
+
+  -- Check if the signal sets have changed; rebuild if so.
+  local function count_keys(t) local n = 0 for _ in pairs(t) do n = n + 1 end return n end
+
+  local function row_needs_rebuild(row_elem, tbl)
+    if not (row_elem and row_elem.valid) then
+      return count_keys(tbl) > 0
+    end
+    local children = row_elem.children
+    if #children ~= count_keys(tbl) then return true end
+    for _, child in ipairs(children) do
+      local key = child.name:match("^wdp_sigbar_(.+)$")
+      if not key or tbl[key] == nil then return true end
+    end
+    return false
+  end
+
+  local red_row   = inner.wdp_red_row
+  local green_row = inner.wdp_green_row
+
+  if row_needs_rebuild(red_row, red_tbl)
+      or row_needs_rebuild(green_row, green_tbl) then
+    rebuild_signal_bar(frame, panel, player_index)
+    return
+  end
+
+  -- Same sets -- update counts in-place.
+  local function update_row(row_elem, tbl)
+    if not (row_elem and row_elem.valid) then return end
+    for _, child in ipairs(row_elem.children) do
+      if child and child.valid then
+        local key = child.name:match("^wdp_sigbar_(.+)$")
+        if key then
+          local count = tbl[key] or 0
+          child.number = count
+          local _, signame = key:match("^([^:]+):([^:]+)")
+          child.tooltip = (signame or key) .. ": " .. format_si_compact(count)
+        end
+      end
+    end
+  end
+
+  update_row(red_row,   red_tbl)
+  update_row(green_row, green_tbl)
+end
+
 local function get_active_segment_config(panel, player_index)
   local state = get_gui_state(player_index)
   if not state then return nil, nil end
@@ -1543,10 +2237,7 @@ local function get_active_segment_config(panel, player_index)
   local pdata = ensure_panel_segment_data(panel)
   if not pdata then return nil, nil end
 
-  local idx = state.active_tab or 1
-  idx = math.max(1, math.min(idx, pdata.segment_count))
-  state.active_tab = idx
-
+  local idx = math.max(1, math.min(state.active_tab or 1, pdata.segment_count))
   return pdata.segments[idx], idx
 end
 
@@ -1572,6 +2263,7 @@ local function comparator_items()
   return items
 end
 
+
 local function safe_number_text(text)
   local n = tonumber(text)
   if n == nil then return nil end
@@ -1580,6 +2272,7 @@ end
 
 local apply_gui_to_segment
 local refresh_live_panel_preview
+local rebuild_editor
 local refresh_main_gui
 
 local function add_rule(seg)
@@ -1616,6 +2309,50 @@ local function render_rhs_count_for_rule(panel, rule, merged_tbl)
   return tostring(val)
 end
 
+------------------------------------------------------------
+-- Combinator config serialise / apply
+-- (used by both segment and panel copy/paste)
+------------------------------------------------------------
+local function serialise_combinator_config(ent)
+  if not (ent and ent.valid) then return nil end
+  local cb = ent.get_or_create_control_behavior()
+  if not cb then return nil end
+
+  local kind
+  if ent.name == "wdp-smart-arithmetic" then
+    kind = "arithmetic"
+  elseif ent.name == "wdp-smart-decider" then
+    kind = "decider"
+  else
+    return nil
+  end
+
+  local ok, params = pcall(function()
+    if kind == "arithmetic" then
+      return cb.arithmetic_conditions
+    else
+      return cb.decider_conditions
+    end
+  end)
+
+  if not ok or not params then return nil end
+  return { kind = kind, params = deep_copy(params) }
+end
+
+local function apply_combinator_config(ent, config)
+  if not (ent and ent.valid and config and config.params) then return end
+  local cb = ent.get_or_create_control_behavior()
+  if not cb then return end
+
+  pcall(function()
+    if config.kind == "arithmetic" then
+      cb.arithmetic_conditions = config.params
+    else
+      cb.decider_conditions = config.params
+    end
+  end)
+end
+
 local function copy_active_segment(player)
   ensure_global()
 
@@ -1628,9 +2365,26 @@ local function copy_active_segment(player)
   local seg = get_active_segment_config(panel, player.index)
   if not seg then return false end
 
+  -- Deep-copy the segment including smart state.
+  -- entity_unit_numbers are excluded because they are runtime
+  -- handles; paste will re-create entities as needed.
+  local seg_copy = deep_copy(seg)
+  if seg_copy.smart then
+    for _, kind in ipairs({ "arithmetic_a", "arithmetic_b", "decider" }) do
+      local slot = seg_copy.smart[kind]
+      if slot then
+        -- Capture combinator config before stripping the unit number.
+        local ref = seg.smart[kind] and seg.smart[kind].entity_unit_number
+        local ent = ref and get_registered_smart_combinator(ref) or nil
+        slot.config = serialise_combinator_config(ent)
+        slot.entity_unit_number = nil
+      end
+    end
+  end
+
   global.wdp.clipboard[player.index] = {
     kind = "segment",
-    data = deep_copy(seg),
+    data = seg_copy,
   }
 
   return true
@@ -1676,12 +2430,209 @@ local function paste_active_segment(player)
     end
   end
 
+  -- Restore smart logic state.
+  local src_smart = pasted.smart or {}
+  seg.smart = seg.smart or {}
+  seg.smart.enabled = (src_smart.enabled == true)
+
+  for _, kind in ipairs({ "arithmetic_a", "arithmetic_b", "decider" }) do
+    local src_slot = src_smart[kind] or {}
+    seg.smart[kind] = seg.smart[kind] or {}
+    local dst_slot = seg.smart[kind]
+
+    local want_enabled = (src_slot.enabled == true) and seg.smart.enabled
+
+    if want_enabled then
+      local ref = dst_slot.entity_unit_number
+      local ent = ref and get_registered_smart_combinator(ref) or nil
+      if not ent then
+        ent = create_smart_combinator(panel, seg_idx, kind)
+        if ent and ent.valid then
+          dst_slot.entity_unit_number = ent.unit_number
+        else
+          dst_slot.entity_unit_number = nil
+        end
+      end
+      dst_slot.enabled = true
+      if ent and src_slot.config then
+        apply_combinator_config(ent, src_slot.config)
+      end
+    else
+      if dst_slot.entity_unit_number then
+        destroy_segment_smart_combinator(seg, kind)
+      end
+      dst_slot.enabled = false
+    end
+  end
+
   persist_panel_config(panel)
   global.wdp.last_render_hash[panel.unit_number] = nil
   global.wdp.chart_tag_hash[panel.unit_number] = nil
 
   mirror_and_cache(panel.unit_number)
   refresh_main_gui(player)
+  return true
+end
+
+
+------------------------------------------------------------
+-- Panel-wide copy / paste  (Ctrl-C / settings-paste tool)
+------------------------------------------------------------
+
+-- Serialise one smart combinator's behavior config so it can
+-- be stored in the clipboard and re-applied on paste.
+-- Capture the full panel state into the player's panel clipboard.
+local function copy_panel(player, panel)
+  ensure_global()
+  if not (panel and panel.valid) then return false end
+
+  ensure_panel_runtime(panel)
+  apply_gui_to_segment(player)
+
+  local pdata = ensure_panel_segment_data(panel)
+  if not pdata then return false end
+
+  local segments = {}
+
+  for seg_idx = 1, pdata.segment_count do
+    local seg = pdata.segments[seg_idx]
+    if not seg then break end
+
+    local seg_copy = {
+      show_in_alt_mode = seg.show_in_alt_mode,
+      -- show_in_chart intentionally excluded
+      rules = deep_copy(seg.rules),
+      smart = {
+        enabled = seg.smart and seg.smart.enabled or false,
+        arithmetic_a = {
+          enabled = seg.smart and seg.smart.arithmetic_a and seg.smart.arithmetic_a.enabled or false,
+          config   = nil,
+        },
+        arithmetic_b = {
+          enabled = seg.smart and seg.smart.arithmetic_b and seg.smart.arithmetic_b.enabled or false,
+          config   = nil,
+        },
+        decider = {
+          enabled = seg.smart and seg.smart.decider and seg.smart.decider.enabled or false,
+          config   = nil,
+        },
+      },
+    }
+
+    -- Serialise combinator configs if entities exist.
+    if seg.smart then
+      for _, kind in ipairs({ "arithmetic_a", "arithmetic_b", "decider" }) do
+        local slot = seg.smart[kind]
+        if slot and slot.enabled and slot.entity_unit_number then
+          local ent = get_registered_smart_combinator(slot.entity_unit_number)
+          seg_copy.smart[kind].config = serialise_combinator_config(ent)
+        end
+      end
+    end
+
+    segments[seg_idx] = seg_copy
+  end
+
+  global.wdp.clipboard[player.index] = {
+    kind     = "panel",
+    segments = segments,
+  }
+
+  return true
+end
+
+-- Paste a panel clipboard onto a destination panel.
+-- Segments are mapped 1-to-1; extras on the source are dropped,
+-- extras on the destination are left untouched.
+local function paste_panel(player, src_panel, dst_panel)
+  ensure_global()
+  if not (dst_panel and dst_panel.valid) then return false end
+
+  -- src_panel may be nil if we're pasting from clipboard rather
+  -- than directly from a source entity.
+  local clip
+  if src_panel and src_panel.valid and src_panel ~= dst_panel then
+    -- Called from on_entity_settings_pasted: build clip on the fly.
+    copy_panel(player, src_panel)
+  end
+  clip = global.wdp.clipboard[player.index]
+
+  if not clip or clip.kind ~= "panel" or not clip.segments then
+    return false
+  end
+
+  ensure_panel_runtime(dst_panel)
+
+  local pdata = ensure_panel_segment_data(dst_panel)
+  if not pdata then return false end
+
+  local n_src = #clip.segments
+  local n_dst = pdata.segment_count
+
+  for seg_idx = 1, math.min(n_src, n_dst) do
+    local src_seg = clip.segments[seg_idx]
+    local dst_seg = pdata.segments[seg_idx]
+    if not (src_seg and dst_seg) then break end
+
+    dst_seg.show_in_alt_mode = (src_seg.show_in_alt_mode == true)
+    -- show_in_chart left untouched
+
+    dst_seg.rules = deep_copy(src_seg.rules) or { default_rule() }
+    if #dst_seg.rules == 0 then dst_seg.rules = { default_rule() } end
+    for i = 1, #dst_seg.rules do
+      dst_seg.rules[i] = ensure_rule_shape(dst_seg.rules[i])
+    end
+
+    -- Smart combinator state
+    local src_smart = src_seg.smart or {}
+    dst_seg.smart = dst_seg.smart or {}
+    dst_seg.smart.enabled = (src_smart.enabled == true)
+
+    for _, kind in ipairs({ "arithmetic_a", "arithmetic_b", "decider" }) do
+      local src_slot = src_smart[kind] or {}
+      dst_seg.smart[kind] = dst_seg.smart[kind] or {}
+      local dst_slot = dst_seg.smart[kind]
+
+      local want_enabled = (src_slot.enabled == true) and dst_seg.smart.enabled
+
+      if want_enabled then
+        -- Ensure the entity exists (create if missing).
+        local ref = dst_slot.entity_unit_number
+        local ent = ref and get_registered_smart_combinator(ref) or nil
+        if not ent then
+          ent = create_smart_combinator(dst_panel, seg_idx, kind)
+          if ent and ent.valid then
+            dst_slot.entity_unit_number = ent.unit_number
+          else
+            dst_slot.entity_unit_number = nil
+          end
+        end
+        dst_slot.enabled = true
+        -- Re-apply saved combinator config.
+        if ent and src_slot.config then
+          apply_combinator_config(ent, src_slot.config)
+        end
+      else
+        -- Disable and destroy if it was running.
+        if dst_slot.entity_unit_number then
+          destroy_segment_smart_combinator(dst_seg, kind)
+        end
+        dst_slot.enabled = false
+      end
+    end
+  end
+
+  persist_panel_config(dst_panel)
+  global.wdp.last_render_hash[dst_panel.unit_number] = nil
+  global.wdp.chart_tag_hash[dst_panel.unit_number]   = nil
+  mirror_and_cache(dst_panel.unit_number)
+
+  -- Refresh GUI if the player has the destination panel open.
+  local state = get_gui_state(player.index)
+  if state and state.panel_unit == dst_panel.unit_number then
+    refresh_main_gui(player)
+  end
+
   return true
 end
 
@@ -1727,166 +2678,415 @@ local function rebuild_connected_row(holder, panel)
 
   local red_id, green_id = get_network_ids_by_color(panel)
 
-local conn = holder.add{
-  type = "flow",
-  name = "wdp_connected_row",
-  direction = "horizontal"
-}
-conn.style.horizontally_stretchable = true
-conn.style.horizontal_spacing = 4
-conn.style.vertical_align = "center"
-conn.style.height = 24
+  local conn = holder.add{
+    type = "flow",
+    name = "wdp_connected_row",
+    direction = "horizontal"
+  }
+  conn.style.horizontally_stretchable = true
+  conn.style.horizontal_spacing = 4
+  conn.style.vertical_align = "center"
+  conn.style.height = 24
+  conn.style.top_margin = 2
+  conn.style.bottom_margin = 2
 
-  local label = conn.add{ type = "label", caption = "Connected to:" }
-label.style.top_margin = 7
+  local label = conn.add{
+    type = "label",
+    caption = "Connected to:"
+  }
+  label.style.top_margin = 7
 
-local red = conn.add{ type = "label", caption = tostring(red_id or 0) }
-red.style.font_color = { 1, 0.23, 0.19 }
-red.style.top_margin = 7
+  local red = conn.add{
+    type = "label",
+    caption = tostring(red_id or 0)
+  }
+  red.style.font_color = { 1, 0.23, 0.19 }
+  red.style.top_margin = 7
 
-local green = conn.add{ type = "label", caption = tostring(green_id or 0) }
-green.style.font_color = { 0.25, 0.9, 0.25 }
-green.style.top_margin = 7
+  local green = conn.add{
+    type = "label",
+    caption = tostring(green_id or 0)
+  }
+  green.style.font_color = { 0.25, 0.9, 0.25 }
+  green.style.top_margin = 7
+
+  local spacer = conn.add{ type = "empty-widget" }
+  spacer.style.horizontally_stretchable = true
 end
 
 local function rebuild_alt_row(body, panel, player_index)
-  if body.wdp_alt_row and body.wdp_alt_row.valid then
-    body.wdp_alt_row.destroy()
-  end
-
-  local seg = get_active_segment_config(panel, player_index)
-  if not seg then return end
-
-  local row = body.add{ type = "flow", name = "wdp_alt_row", direction = "horizontal" }
-  row.style.bottom_margin = 7
-
-  row.add{
-    type = "checkbox",
-    name = "wdp_show_in_alt_mode",
-    caption = 'Always show in "Alt-mode"',
-    state = seg.show_in_alt_mode == true
-  }
 end
 
 local function rebuild_chart_row(body, panel, player_index)
-  if body.wdp_chart_row and body.wdp_chart_row.valid then
-    body.wdp_chart_row.destroy()
-  end
-
-  local seg = get_active_segment_config(panel, player_index)
-  if not seg then return end
-
-  local row = body.add{ type = "flow", name = "wdp_chart_row", direction = "horizontal" }
-  row.style.bottom_margin = 6
-
-  row.add{
-    type = "checkbox",
-    name = "wdp_show_in_chart",
-    caption = "Show this tag in chart",
-    state = seg.show_in_chart == true
-  }
 end
 
 local function rebuild_segment_tabs(frame, panel, player_index)
   local body = frame.wdp_body
   if not (body and body.valid) then return end
 
-  if body.wdp_tabs then body.wdp_tabs.destroy() end
+  if body.wdp_top_controls and body.wdp_top_controls.valid then
+    body.wdp_top_controls.destroy()
+  end
+
+  if body.wdp_tabs and body.wdp_tabs.valid then
+    body.wdp_tabs.destroy()
+  end
 
   local pdata = ensure_panel_segment_data(panel)
   if not pdata then return end
 
-  local outer = body.add{ type = "flow", name = "wdp_tabs", direction = "horizontal" }
-  outer.style.horizontally_stretchable = true
-  outer.style.top_margin = 4
-  outer.style.bottom_margin = 8
+  local state = get_gui_state(player_index)
+  local seg = get_active_segment_config(panel, player_index)
+  if not seg then return end
 
-  local left_spacer = outer.add{ type = "empty-widget" }
-  left_spacer.style.horizontally_stretchable = true
+  ------------------------------------------------------------
+  -- Top controls root
+  ------------------------------------------------------------
+  local top = body.add{
+    type = "flow",
+    name = "wdp_top_controls",
+    direction = "vertical"
+  }
+  top.style.horizontally_stretchable = true
+  top.style.top_margin = 2
+  top.style.bottom_margin = 6
+  top.style.vertical_spacing = 6
 
-  local inner = outer.add{ type = "flow", name = "wdp_tabs_inner", direction = "horizontal" }
-  inner.style.horizontal_spacing = 8
-  inner.style.vertical_align = "center"
+  ------------------------------------------------------------
+  -- Row 1: segment tabs + copy/paste
+  ------------------------------------------------------------
+  local tabs_row = top.add{
+    type = "flow",
+    name = "wdp_tabs_row",
+    direction = "horizontal"
+  }
+  tabs_row.style.horizontally_stretchable = true
+  tabs_row.style.vertical_align = "center"
+  tabs_row.style.horizontal_spacing = 6
 
-  local seg_flow = inner.add{ type = "flow", name = "wdp_segment_flow", direction = "horizontal" }
-  seg_flow.style.horizontal_spacing = 4
-  seg_flow.style.vertical_align = "center"
+  local tabs_left = tabs_row.add{
+    type = "flow",
+    name = "wdp_segment_flow",
+    direction = "horizontal"
+  }
+  tabs_left.style.horizontal_spacing = 4
+  tabs_left.style.vertical_align = "center"
 
   for i = 1, pdata.segment_count do
-  local b = seg_flow.add{
-    type = "sprite-button",
-    name = "wdp_tab_" .. i,
-    style = "train_schedule_delete_button",
-    sprite = "virtual-signal/signal-" .. i,
-    tooltip = "Select segment " .. i
+    local b = tabs_left.add{
+      type = "sprite-button",
+      name = "wdp_tab_" .. i,
+      style = "train_schedule_delete_button",
+      sprite = "virtual-signal/signal-" .. i,
+      tooltip = "Select segment " .. i
+    }
+    b.style.width = 26
+    b.style.height = 26
+
+    if state and state.active_tab == i then
+      b.enabled = false
+    end
+  end
+
+  local tabs_spacer = tabs_row.add{ type = "empty-widget" }
+  tabs_spacer.style.horizontally_stretchable = true
+
+  local actions = tabs_row.add{
+    type = "flow",
+    name = "wdp_copy_paste_flow",
+    direction = "horizontal"
+  }
+  actions.style.horizontal_spacing = 6
+  actions.style.vertical_align = "center"
+
+  local copy_btn = actions.add{
+    type = "button",
+    name = "wdp_copy_segment",
+    caption = "Copy segment"
+  }
+  copy_btn.style.minimal_width = 92
+  copy_btn.style.height = 28
+
+  local paste_btn = actions.add{
+    type = "button",
+    name = "wdp_paste_segment",
+    caption = "Paste segment"
+  }
+  paste_btn.enabled = not not (global.wdp.clipboard[player_index] and global.wdp.clipboard[player_index].kind == "segment")
+  paste_btn.style.minimal_width = 92
+  paste_btn.style.height = 28
+
+
+  ------------------------------------------------------------
+  -- Row 2: split settings / smart flows
+  ------------------------------------------------------------
+  local lower = top.add{
+    type = "flow",
+    name = "wdp_top_lower",
+    direction = "horizontal"
+  }
+  lower.style.horizontally_stretchable = true
+  lower.style.horizontal_spacing = 8
+  lower.style.vertical_align = "top"
+
+  ------------------------------------------------------------
+  -- Left: settings flow
+  ------------------------------------------------------------
+  local settings_frame = lower.add{
+    type = "flow",
+    name = "wdp_settings_frame",
+    direction = "vertical"
+  }
+  settings_frame.style.horizontally_stretchable = true
+  settings_frame.style.minimal_width = 0
+  settings_frame.style.minimal_height = 60
+  settings_frame.style.left_margin = 8
+  settings_frame.style.right_margin = 8
+  settings_frame.style.top_margin = 8
+  settings_frame.style.bottom_margin = 8
+  settings_frame.style.vertical_spacing = 0
+  settings_frame.style.vertical_align = "center"
+
+  local alt_row = settings_frame.add{
+    type = "flow",
+    name = "wdp_alt_row",
+    direction = "horizontal"
+  }
+  alt_row.style.horizontal_spacing = 6
+  alt_row.style.vertical_align = "center"
+  alt_row.style.height = 22
+
+  alt_row.add{
+    type = "checkbox",
+    name = "wdp_show_in_alt_mode",
+    caption = 'Always show in "Alt-mode"',
+    state = seg.show_in_alt_mode == true
   }
 
-  b.style.width = 26
-  b.style.height = 26
+  local chart_row = settings_frame.add{
+    type = "flow",
+    name = "wdp_chart_row",
+    direction = "horizontal"
+  }
+  chart_row.style.top_margin = 7
+  chart_row.style.horizontal_spacing = 6
+  chart_row.style.vertical_align = "center"
+  chart_row.style.height = 22
 
-  if get_gui_state(player_index).active_tab == i then
-    b.enabled = false
-  end
-end
-  
-  local spacer = inner.add{ type = "empty-widget" }
-  spacer.style.width = 100
+  chart_row.add{
+    type = "checkbox",
+    name = "wdp_show_in_chart",
+    caption = "Show this tag in chart",
+    state = seg.show_in_chart == true
+  }
 
-  local cp_flow = inner.add{ type = "flow", name = "wdp_copy_paste_flow", direction = "horizontal" }
-  cp_flow.style.horizontal_spacing = 8
-  cp_flow.style.vertical_align = "center"
+  ------------------------------------------------------------
+  -- Right: smart flow
+  ------------------------------------------------------------
+  local smart_frame = lower.add{
+    type = "flow",
+    name = "wdp_smart_frame",
+    direction = "vertical"
+  }
+  smart_frame.style.horizontally_stretchable = true
+  smart_frame.style.minimal_width = 0
+  smart_frame.style.minimal_height = 60
+  smart_frame.style.left_margin = 8
+  smart_frame.style.right_margin = 8
+  smart_frame.style.top_margin = 8
+  smart_frame.style.bottom_margin = 8
+  smart_frame.style.vertical_spacing = 0
+  smart_frame.style.vertical_align = "center"
 
-  cp_flow.add{ type = "button", name = "wdp_copy_segment", caption = "Copy segment" }
+  ------------------------------------------------------------
+  -- Smart row 1: label + checkbox, right aligned
+  ------------------------------------------------------------
+  local smart_enable_row = smart_frame.add{
+    type = "flow",
+    name = "wdp_smart_enable_row",
+    direction = "horizontal"
+  }
+  smart_enable_row.style.horizontally_stretchable = true
+  smart_enable_row.style.vertical_align = "center"
+  smart_enable_row.style.horizontal_spacing = 6
+  smart_enable_row.style.height = 22
 
-  local paste_btn = cp_flow.add{ type = "button", name = "wdp_paste_segment", caption = "Paste segment" }
-  paste_btn.enabled = not not (global.wdp.clipboard[player_index] and global.wdp.clipboard[player_index].kind == "segment")
+  local enable_spacer = smart_enable_row.add{ type = "empty-widget" }
+  enable_spacer.style.horizontally_stretchable = true
 
-  local right_spacer = outer.add{ type = "empty-widget" }
-  right_spacer.style.horizontally_stretchable = true
+  smart_enable_row.add{
+    type = "label",
+    name = "wdp_enable_smart_logic_label",
+    caption = "Enable smart logic "
+  }
+
+    local smart_toggle = smart_enable_row.add{
+  type = "checkbox",
+  name = "wdp_enable_smart_logic_placeholder",
+  caption = "",
+  state = seg.smart and seg.smart.enabled == true
+}
+
+  ------------------------------------------------------------
+  -- Smart row 2: arithmetic / decider controls, right aligned
+  ------------------------------------------------------------
+  local smart_modes_row = smart_frame.add{
+    type = "flow",
+    name = "wdp_smart_modes_row",
+    direction = "horizontal"
+  }
+  smart_modes_row.style.horizontally_stretchable = true
+  smart_modes_row.style.vertical_align = "center"
+  smart_modes_row.style.horizontal_spacing = 6
+  smart_modes_row.style.top_margin = 4
+  smart_modes_row.style.height = 28
+
+  local smart_spacer = smart_modes_row.add{ type = "empty-widget" }
+  smart_spacer.style.horizontally_stretchable = true
+
+  local smart_enabled = seg.smart and seg.smart.enabled == true
+  local arith_b_enabled = smart_enabled and seg.smart.arithmetic_b and seg.smart.arithmetic_b.enabled == true
+  local arith_a_enabled = arith_b_enabled and seg.smart.arithmetic_a and seg.smart.arithmetic_a.enabled == true
+
+  -- arithmetic_a button + checkbox
+  local arith_a_group = smart_modes_row.add{
+    type = "flow", name = "wdp_smart_arithmetic_a_group", direction = "horizontal"
+  }
+  arith_a_group.style.vertical_align = "center"
+  arith_a_group.style.horizontal_spacing = 7
+
+  local arith_a_btn = arith_a_group.add{
+    type = "sprite-button",
+    name = "wdp_smart_arithmetic_a_placeholder",
+    style = "train_schedule_item_select_button",
+    sprite = "item/arithmetic-combinator",
+    tooltip = "Configure upstream arithmetic logic (A)"
+  }
+  arith_a_btn.style.width = 28
+  arith_a_btn.style.height = 28
+  arith_a_btn.enabled = arith_a_enabled
+
+  local arith_a_check = arith_a_group.add{
+    type = "checkbox",
+    name = "wdp_smart_arithmetic_a_check_placeholder",
+    caption = "",
+    state = arith_a_enabled
+  }
+  arith_a_check.enabled = arith_b_enabled
+
+  -- arrow between arithmetic_a and arithmetic_b
+  local arrow_lbl = smart_modes_row.add{ type = "label", caption = "→" }
+  arrow_lbl.style.horizontal_align = "center"
+  arrow_lbl.style.vertical_align = "center"
+  arrow_lbl.style.left_margin = 2
+  arrow_lbl.style.right_margin = 2
+
+  -- arithmetic_b button + checkbox
+  local arith_b_group = smart_modes_row.add{
+    type = "flow", name = "wdp_smart_arithmetic_b_group", direction = "horizontal"
+  }
+  arith_b_group.style.vertical_align = "center"
+  arith_b_group.style.horizontal_spacing = 7
+
+  local arith_b_btn = arith_b_group.add{
+    type = "sprite-button",
+    name = "wdp_smart_arithmetic_b_placeholder",
+    style = "train_schedule_item_select_button",
+    sprite = "item/arithmetic-combinator",
+    tooltip = "Configure arithmetic logic (B)"
+  }
+  arith_b_btn.style.width = 28
+  arith_b_btn.style.height = 28
+  arith_b_btn.enabled = arith_b_enabled
+
+  local arith_b_check = arith_b_group.add{
+    type = "checkbox",
+    name = "wdp_smart_arithmetic_b_check_placeholder",
+    caption = "",
+    state = arith_b_enabled
+  }
+  arith_b_check.enabled = smart_enabled
+
+  local between_spacer = smart_modes_row.add{ type = "empty-widget" }
+  between_spacer.style.width = 16
+
+  local decider_group = smart_modes_row.add{
+    type = "flow", name = "wdp_smart_decider_group", direction = "horizontal"
+  }
+  decider_group.style.vertical_align = "center"
+  decider_group.style.horizontal_spacing = 7
+
+  local decider_btn = decider_group.add{
+    type = "sprite-button",
+    name = "wdp_smart_decider_placeholder",
+    style = "train_schedule_item_select_button",
+    sprite = "item/decider-combinator",
+    tooltip = "Configure decider logic"
+  }
+  decider_btn.style.width = 28
+  decider_btn.style.height = 28
+  decider_btn.enabled = smart_enabled
+    and seg.smart.decider
+    and seg.smart.decider.enabled == true
+
+  local decider_check = decider_group.add{
+    type = "checkbox",
+    name = "wdp_smart_decider_check_placeholder",
+    caption = "",
+    state = seg.smart and seg.smart.decider and seg.smart.decider.enabled == true
+  }
+  decider_check.enabled = smart_enabled
 end
 
 local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl, rule_count)
   local row = parent.add{
     type = "frame",
     name = "wdp_rule_" .. rule_idx,
-    direction = "vertical",
-    style = "shallow_frame",
+    direction = "horizontal",
+    style = "train_schedule_station_frame",
     tags = { rule_index = rule_idx, segment_index = seg_idx }
   }
   row.style.horizontally_stretchable = true
-  row.style.top_padding = 0
-  row.style.bottom_padding = 0
-  row.style.left_padding = 0
-  row.style.right_padding = 0
-  row.style.bottom_margin = 2
+  row.style.top_padding = 3
+  row.style.bottom_padding = 3
+  row.style.left_padding = 6
+  row.style.right_padding = 6
+  row.style.bottom_margin = 1
 
-  local line = row.add{ type = "flow", name = "wdp_line", direction = "horizontal" }
-  line.style.horizontal_spacing = 3
-  line.style.vertical_align = "center"
-  line.style.height = 30
-  line.style.left_margin = 4
-  line.style.right_margin = 4
-  line.style.top_margin = 2
-  line.style.bottom_margin = 2
+  ------------------------------------------------------------
+  -- [icon signal]
+  ------------------------------------------------------------
+  local icon_pick = row.add{
+    type = "choose-elem-button",
+    name = "wdp_icon_signal",
+	style = "train_schedule_item_select_button",
+    elem_type = "signal",
+    signal = clone_signal(rule.icon_signal)
+  }
+  icon_pick.style.width = 28
+  icon_pick.style.height = 28
+  icon_pick.style.minimal_width = 28
+  icon_pick.style.minimal_height = 28
+  icon_pick.style.maximal_width = 28
+  icon_pick.style.maximal_height = 28
 
-  line.add{
-  type = "choose-elem-button",
-  name = "wdp_icon_signal",
-  elem_type = "signal",
-  signal = clone_signal(rule.icon_signal)
-}
-
-  local preview = line.add{
+  ------------------------------------------------------------
+  -- [message preview]
+  ------------------------------------------------------------
+  local preview = row.add{
     type = "label",
     name = "wdp_message_preview",
     caption = message_preview_text(rule.message)
   }
-  preview.style.minimal_width = 70
-  preview.style.maximal_width = 70
+  preview.style.minimal_width = 53
+  preview.style.maximal_width = 53
   preview.style.single_line = true
   preview.style.font_color = { 0.85, 0.85, 0.85 }
 
-  local edit_btn = line.add{
+  ------------------------------------------------------------
+  -- [edit message button]
+  ------------------------------------------------------------
+  local edit_btn = row.add{
     type = "sprite-button",
     name = "wdp_msg_edit_" .. rule_idx,
     sprite = "wdp_gui_edit",
@@ -1899,51 +3099,102 @@ local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl
   edit_btn.style.height = 24
   edit_btn.style.left_margin = -3
 
-  local gap1 = line.add{ type = "empty-widget" }
-  gap1.style.width = 70
+  ------------------------------------------------------------
+  -- [space]
+  ------------------------------------------------------------
+  local gap1 = row.add{ type = "empty-widget" }
+  gap1.style.width = 64
   gap1.style.height = 1
 
-  line.add{
-  type = "choose-elem-button",
-  name = "wdp_first_signal",
-  elem_type = "signal",
-  signal = clone_signal(rule.icon_signal)
-}
+  ------------------------------------------------------------
+  -- [first signal button]
+  ------------------------------------------------------------
+  local first_sig_count = rule.first_signal
+    and format_si_compact(signal_value_from_table(merged_tbl, rule.first_signal))
+    or nil
+  local first_tooltip = first_sig_count
+    and ("Current value: " .. first_sig_count)
+    or "Choose condition signal"
 
-  local dd = line.add{ type = "drop-down", name = "wdp_comparator" }
+  local first_pick = row.add{
+    type = "choose-elem-button",
+    name = "wdp_first_signal",
+	style = "train_schedule_item_select_button",
+    elem_type = "signal",
+    signal = clone_signal(rule.first_signal),
+    tooltip = first_tooltip,
+  }
+  first_pick.style.width = 28
+  first_pick.style.height = 28
+  first_pick.style.minimal_width = 28
+  first_pick.style.minimal_height = 28
+  first_pick.style.maximal_width = 28
+  first_pick.style.maximal_height = 28
+
+  ------------------------------------------------------------
+  -- [comparator dropdown]
+  ------------------------------------------------------------
+  local dd = row.add{
+    type = "drop-down",
+    name = "wdp_comparator",
+    style = "train_schedule_circuit_condition_comparator_dropdown"
+  }
   dd.items = comparator_items()
   dd.selected_index = COMPARATOR_INDEX[rule.comparator] or 1
-  dd.style.width = 58
-  dd.style.height = 26
+  dd.style.minimal_width = 41
+  dd.style.height = 28
 
+  ------------------------------------------------------------
+  -- [rhs button]
+  ------------------------------------------------------------
   if rule.rhs and rule.rhs.kind == "signal" and rule.rhs.signal then
-    local rhs_sprite = sprite_path_from_signal(rule.rhs.signal)
-    local rhs_btn = line.add{
+    local rhs_sig_count = format_si_compact(signal_value_from_table(merged_tbl, rule.rhs.signal))
+    local rhs_btn = row.add{
       type = "sprite-button",
       name = "wdp_rhs_open_" .. rule_idx,
-      sprite = rhs_sprite,
-      tooltip = "Set signal or constant",
+      style = "train_schedule_item_select_button",
+      sprite = sprite_path_from_signal(rule.rhs.signal),
+      tooltip = "Current value: " .. rhs_sig_count .. "\nClick to change",
       tags = { rule_index = rule_idx, segment_index = seg_idx }
     }
     rhs_btn.style.width = 28
     rhs_btn.style.height = 28
+    rhs_btn.style.minimal_width = 28
+    rhs_btn.style.minimal_height = 28
+    rhs_btn.style.maximal_width = 28
+    rhs_btn.style.maximal_height = 28
   else
-    local rhs_btn = line.add{
+    
+	local rhs_btn = row.add{
       type = "button",
       name = "wdp_rhs_open_" .. rule_idx,
-      caption = tostring(tonumber(rule.rhs and rule.rhs.constant) or 0),
-      tooltip = "Set signal or constant",
+      style = "train_schedule_item_select_button",
+      caption = format_si_compact(rule.rhs and rule.rhs.constant),
+      tooltip = "Constant: " .. tostring(rule.rhs and rule.rhs.constant or 0) .. "\nClick to change",
       tags = { rule_index = rule_idx, segment_index = seg_idx }
     }
-    rhs_btn.style.minimal_width = 41
-    rhs_btn.style.height = 26
+    rhs_btn.style.width = 28
+    rhs_btn.style.height = 28
+    rhs_btn.style.minimal_width = 28
+    rhs_btn.style.minimal_height = 28
+    rhs_btn.style.maximal_width = 28
+    rhs_btn.style.maximal_height = 28
+	rhs_btn.style.font = "default"
+    rhs_btn.style.font_color = { 1, 1, 1 }
+	rhs_btn.style.horizontal_align = "center"
   end
 
-  local gap2 = line.add{ type = "empty-widget" }
-  gap2.style.width = 65
+  ------------------------------------------------------------
+  -- [space]
+  ------------------------------------------------------------
+  local gap2 = row.add{ type = "empty-widget" }
+  gap2.style.width = 64
   gap2.style.height = 1
 
-  local up = line.add{
+  ------------------------------------------------------------
+  -- [up][down][delete]
+  ------------------------------------------------------------
+  local up = row.add{
     type = "sprite-button",
     name = "wdp_rule_up_" .. rule_idx,
     style = "train_schedule_delete_button",
@@ -1952,10 +3203,10 @@ local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl
     tags = { rule_index = rule_idx, segment_index = seg_idx }
   }
   up.enabled = rule_idx > 1
-  up.style.width = 26
-  up.style.height = 26
+  up.style.width = 28
+  up.style.height = 28
 
-  local down = line.add{
+  local down = row.add{
     type = "sprite-button",
     name = "wdp_rule_down_" .. rule_idx,
     style = "train_schedule_delete_button",
@@ -1964,10 +3215,10 @@ local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl
     tags = { rule_index = rule_idx, segment_index = seg_idx }
   }
   down.enabled = rule_idx < rule_count
-  down.style.width = 26
-  down.style.height = 26
+  down.style.width = 28
+  down.style.height = 28
 
-  local del = line.add{
+  local del = row.add{
     type = "sprite-button",
     name = "wdp_rule_delete_" .. rule_idx,
     style = "train_schedule_delete_button",
@@ -1975,18 +3226,28 @@ local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl
     tooltip = "Delete message",
     tags = { rule_index = rule_idx, segment_index = seg_idx }
   }
-  del.style.width = 26
-  del.style.height = 26
+  del.style.width = 28
+  del.style.height = 28
 end
 
-local function rebuild_editor(frame, panel, player_index, merged_tbl)
+rebuild_editor = function(frame, panel, player_index, merged_tbl)
   local body = frame.wdp_body
   if not (body and body.valid) then return end
 
-  if body.wdp_editor then body.wdp_editor.destroy() end
+  if body.wdp_editor and body.wdp_editor.valid then
+    body.wdp_editor.destroy()
+  end
 
   local seg, seg_idx = get_active_segment_config(panel, player_index)
   if not seg then return end
+
+  -- Use the smart-effective signal table for the active segment so
+  -- tooltips show combinator output values, not raw panel input.
+  local effective_tbl = merged_tbl
+  if seg and seg.smart and seg.smart.enabled then
+    effective_tbl = select(1, compute_smart_output_for_segment(panel, seg))
+  end
+  merged_tbl = effective_tbl
 
   local editor = body.add{
     type = "flow",
@@ -2056,13 +3317,35 @@ apply_gui_to_segment = function(player)
   local body = frame.wdp_body
   if not (body and body.valid and body.wdp_editor and body.wdp_editor.valid) then return end
 
-  if body.wdp_alt_row and body.wdp_alt_row.valid and body.wdp_alt_row.wdp_show_in_alt_mode and body.wdp_alt_row.wdp_show_in_alt_mode.valid then
-    seg.show_in_alt_mode = (body.wdp_alt_row.wdp_show_in_alt_mode.state == true)
+  local settings_frame = nil
+  if body.wdp_top_controls
+    and body.wdp_top_controls.valid
+    and body.wdp_top_controls.wdp_top_lower
+    and body.wdp_top_controls.wdp_top_lower.valid
+    and body.wdp_top_controls.wdp_top_lower.wdp_settings_frame
+    and body.wdp_top_controls.wdp_top_lower.wdp_settings_frame.valid
+  then
+    settings_frame = body.wdp_top_controls.wdp_top_lower.wdp_settings_frame
   end
 
-  if body.wdp_chart_row and body.wdp_chart_row.valid and body.wdp_chart_row.wdp_show_in_chart then
-    local state_checked = body.wdp_chart_row.wdp_show_in_chart.state == true
+  if settings_frame
+    and settings_frame.wdp_alt_row
+    and settings_frame.wdp_alt_row.valid
+    and settings_frame.wdp_alt_row.wdp_show_in_alt_mode
+    and settings_frame.wdp_alt_row.wdp_show_in_alt_mode.valid
+  then
+    seg.show_in_alt_mode = (settings_frame.wdp_alt_row.wdp_show_in_alt_mode.state == true)
+  end
+
+  if settings_frame
+    and settings_frame.wdp_chart_row
+    and settings_frame.wdp_chart_row.valid
+    and settings_frame.wdp_chart_row.wdp_show_in_chart
+    and settings_frame.wdp_chart_row.wdp_show_in_chart.valid
+  then
+    local state_checked = (settings_frame.wdp_chart_row.wdp_show_in_chart.state == true)
     seg.show_in_chart = state_checked
+
     if state_checked then
       for i = 1, pdata.segment_count do
         if i ~= seg_idx and pdata.segments[i] then
@@ -2071,12 +3354,11 @@ apply_gui_to_segment = function(player)
       end
     end
   end
- 
 
-    local list_frame = body.wdp_editor.wdp_rule_list_frame
-if not (list_frame and list_frame.valid and list_frame.wdp_rule_list and list_frame.wdp_rule_list.valid) then return end
+  local list_frame = body.wdp_editor.wdp_rule_list_frame
+  if not (list_frame and list_frame.valid and list_frame.wdp_rule_list and list_frame.wdp_rule_list.valid) then return end
 
-local list = list_frame.wdp_rule_list
+  local list = list_frame.wdp_rule_list
   if not (list and list.valid) then return end
 
   for _, child in ipairs(list.children) do
@@ -2084,19 +3366,22 @@ local list = list_frame.wdp_rule_list
       local idx = tonumber(child.tags and child.tags.rule_index)
       if idx and seg.rules[idx] then
         local rule = seg.rules[idx]
-        local line = child.wdp_line
-        if line and line.valid then
-          if line.wdp_icon_signal and line.wdp_icon_signal.valid then
-            rule.icon_signal = clone_signal(line.wdp_icon_signal.elem_value)
-          end
-          if line.wdp_first_signal and line.wdp_first_signal.valid then
-            rule.first_signal = clone_signal(line.wdp_first_signal.elem_value)
-          end
-          if line.wdp_comparator and line.wdp_comparator.valid then
-            local dd = line.wdp_comparator
-            if dd.selected_index and COMPARATORS[dd.selected_index] then
-              rule.comparator = COMPARATORS[dd.selected_index].key
-            end
+
+        -- Rule controls now live directly on the row frame.
+        local row = child
+
+        if row.wdp_icon_signal and row.wdp_icon_signal.valid then
+          rule.icon_signal = clone_signal(row.wdp_icon_signal.elem_value)
+        end
+
+        if row.wdp_first_signal and row.wdp_first_signal.valid then
+          rule.first_signal = clone_signal(row.wdp_first_signal.elem_value)
+        end
+
+        if row.wdp_comparator and row.wdp_comparator.valid then
+          local dd = row.wdp_comparator
+          if dd.selected_index and COMPARATORS[dd.selected_index] then
+            rule.comparator = COMPARATORS[dd.selected_index].key
           end
         end
       end
@@ -2131,17 +3416,18 @@ refresh_main_gui = function(player)
     frame.wdp_titlebar.wdp_title.caption = spec and spec.title or "Widescreen Display Panel"
   end
 
-    if frame.wdp_connected_holder and frame.wdp_connected_holder.valid then
+  if frame.wdp_connected_holder and frame.wdp_connected_holder.valid then
     rebuild_connected_row(frame.wdp_connected_holder, panel)
   end
 
   if frame.wdp_body and frame.wdp_body.valid then
+    rebuild_segment_tabs(frame, panel, player.index)
     rebuild_alt_row(frame.wdp_body, panel, player.index)
     rebuild_chart_row(frame.wdp_body, panel, player.index)
   end
 
-  rebuild_segment_tabs(frame, panel, player.index)
   rebuild_editor(frame, panel, player.index, merged_tbl)
+  rebuild_signal_bar(frame, panel, player.index)
 end
 
 refresh_live_panel_preview = function(player, skip_gui_refresh)
@@ -2245,11 +3531,18 @@ local function open_rhs_popup(player, seg_idx, rule_idx)
   state.active_tab = seg_idx
   state.active_rule = rule_idx
 
-  local popup = player.gui.screen.add{ type = "frame", name = "wdp_rhs_popup", direction = "vertical" }
+  local popup = player.gui.screen.add{
+    type = "frame",
+    name = "wdp_rhs_popup",
+    direction = "vertical"
+  }
   popup.auto_center = true
-  popup.style.width = 320
+  popup.style.width = 280
 
-    local titlebar = popup.add{ type = "flow", direction = "horizontal" }
+  local titlebar = popup.add{
+    type = "flow",
+    direction = "horizontal"
+  }
   titlebar.drag_target = popup
 
   local title = titlebar.add{
@@ -2278,33 +3571,160 @@ local function open_rhs_popup(player, seg_idx, rule_idx)
     tooltip = "Close"
   }
 
-  popup.add{ type = "line" }
-
-  local body = popup.add{ type = "frame", name = "wdp_rhs_body", direction = "vertical" }
-  body.style.top_padding = 10
-  body.style.bottom_padding = 10
+  local body = popup.add{
+    type = "frame",
+    name = "wdp_rhs_body",
+    direction = "vertical",
+    style = "inside_shallow_frame"
+  }
+  body.style.top_padding = 8
+  body.style.bottom_padding = 8
   body.style.left_padding = 10
   body.style.right_padding = 10
 
   refresh_rhs_popup(player)
 end
 
+local function refresh_rhs_popup(player)
+  local popup = player.gui.screen.wdp_rhs_popup
+  if not (popup and popup.valid) then return end
+
+  local state = get_gui_state(player.index)
+  local panel = get_panel_from_gui_state(state)
+  local rule = nil
+  if panel and state then
+    rule = get_rule_from_state(panel, state)
+  end
+  if not rule then
+    destroy_rhs_popup(player)
+    return
+  end
+
+  local content = popup.wdp_rhs_body
+  if not (content and content.valid) then return end
+  content.clear()
+
+  local merged_tbl = compute_merged_for_panel(panel)
+
+  ------------------------------------------------------------
+  -- Signal row
+  ------------------------------------------------------------
+  local sig_row = content.add{
+    type = "flow",
+    name = "wdp_rhs_signal_row",
+    direction = "horizontal"
+  }
+  sig_row.style.horizontal_spacing = 6
+  sig_row.style.vertical_align = "center"
+
+  local sig_label = sig_row.add{
+    type = "label",
+    caption = "Signal"
+  }
+  sig_label.style.minimal_width = 52
+
+  local sig_pick = sig_row.add{
+    type = "choose-elem-button",
+    name = "wdp_rhs_signal_picker",
+    elem_type = "signal",
+    signal = clone_signal(rule.rhs.signal)
+  }
+  sig_pick.style.width = 28
+  sig_pick.style.height = 28
+
+  local sig_ok = sig_row.add{
+    type = "sprite-button",
+    name = "wdp_rhs_signal_apply",
+    sprite = "wdp_gui_confirm",
+    hovered_sprite = "wdp_gui_confirm_hover",
+    clicked_sprite = "wdp_gui_confirm_onclick",
+    disabled_sprite = "wdp_gui_confirm_disabled",
+    tooltip = "Use signal"
+  }
+  sig_ok.enabled = sig_pick.elem_value ~= nil
+  sig_ok.style.width = 28
+  sig_ok.style.height = 28
+
+  local sig_count = content.add{
+    type = "label",
+    name = "wdp_rhs_signal_count",
+    caption = rule.rhs.signal and ("Current count: " .. tostring(signal_value_from_table(merged_tbl, rule.rhs.signal))) or ""
+  }
+  sig_count.style.font = "default-small"
+  sig_count.style.font_color = { 0.75, 0.75, 0.75 }
+  sig_count.style.left_margin = 58
+  sig_count.style.top_margin = 2
+  sig_count.style.bottom_margin = 6
+
+  ------------------------------------------------------------
+  -- Constant row
+  ------------------------------------------------------------
+  local const_row = content.add{
+    type = "flow",
+    name = "wdp_rhs_constant_row",
+    direction = "horizontal"
+  }
+  const_row.style.horizontal_spacing = 6
+  const_row.style.vertical_align = "center"
+
+  local const_label = const_row.add{
+    type = "label",
+    caption = "Constant"
+  }
+  const_label.style.minimal_width = 52
+
+  local tf = const_row.add{
+    type = "textfield",
+    name = "wdp_rhs_constant_text",
+    text = tostring(tonumber(rule.rhs.constant) or 0)
+  }
+  tf.style.width = 92
+
+  local const_ok = const_row.add{
+    type = "sprite-button",
+    name = "wdp_rhs_constant_apply",
+    sprite = "wdp_gui_confirm",
+    hovered_sprite = "wdp_gui_confirm_hover",
+    clicked_sprite = "wdp_gui_confirm_onclick",
+    disabled_sprite = "wdp_gui_confirm_disabled",
+    tooltip = "Use constant"
+  }
+  const_ok.enabled = safe_number_text(tf.text) ~= nil
+  const_ok.style.width = 28
+  const_ok.style.height = 28
+end
+
 local function open_msg_icon_popup(player)
   destroy_msg_icon_popup(player)
 
-  local popup = player.gui.screen.add{ type = "frame", name = "wdp_msg_icon_popup", direction = "vertical" }
-  popup.auto_center = true
-  popup.style.width = 220
+  local anchor = nil
+  local editor = player.gui.screen.wdp_msg_popup
+  if editor
+    and editor.valid
+    and editor.wdp_msg_body
+    and editor.wdp_msg_body.valid
+    and editor.wdp_msg_body.wdp_msg_insert_row
+    and editor.wdp_msg_body.wdp_msg_insert_row.valid
+    and editor.wdp_msg_body.wdp_msg_insert_row.wdp_msg_icon_open
+    and editor.wdp_msg_body.wdp_msg_insert_row.wdp_msg_icon_open.valid
+  then
+    anchor = editor.wdp_msg_body.wdp_msg_insert_row.wdp_msg_icon_open
+  end
 
-  local titlebar = popup.add{ type = "flow", direction = "horizontal" }
-  titlebar.drag_target = popup
-
-  local title = titlebar.add{
-    type = "label",
-    caption = "Insert icon",
-    style = "frame_title"
+  local popup = player.gui.screen.add{
+    type = "frame",
+    name = "wdp_msg_icon_popup",
+    direction = "vertical"
   }
-  title.drag_target = popup
+  popup.style.width = 63
+  popup.style.minimal_width = 63
+  popup.style.maximal_width = 63
+
+  local titlebar = popup.add{
+    type = "flow",
+    direction = "horizontal"
+  }
+  titlebar.drag_target = popup
 
   local drag = titlebar.add{
     type = "empty-widget",
@@ -2325,14 +3745,34 @@ local function open_msg_icon_popup(player)
     tooltip = "Close"
   }
 
-  popup.add{ type = "line" }
+  local body = popup.add{
+    type = "frame",
+    name = "wdp_msg_icon_body",
+    direction = "vertical",
+    style = "inside_shallow_frame"
+  }
+  body.style.top_padding = 6
+  body.style.bottom_padding = 6
+  body.style.left_padding = 6
+  body.style.right_padding = 6
 
-  local body = popup.add{ type = "frame", name = "wdp_msg_icon_body", direction = "vertical" }
-  body.style.top_padding = 10
-  body.style.bottom_padding = 10
-  body.style.left_padding = 10
-  body.style.right_padding = 10
-  body.add{ type = "choose-elem-button", name = "wdp_msg_icon_picker", elem_type = "signal" }
+    local picker = body.add{
+    type = "choose-elem-button",
+    name = "wdp_msg_icon_picker",
+    elem_type = "signal"
+  }
+  picker.style.width = 28
+  picker.style.height = 28
+
+  local editor = player.gui.screen.wdp_msg_popup
+  if editor and editor.valid and editor.location then
+    popup.location = {
+      x = editor.location.x + 5,
+      y = editor.location.y + 5
+    }
+  else
+    popup.auto_center = true
+  end
 end
 
 local function open_message_popup(player, seg_idx, rule_idx)
@@ -2347,11 +3787,18 @@ local function open_message_popup(player, seg_idx, rule_idx)
   local rule = get_rule_from_state(panel, state)
   if not rule then return end
 
-  local popup = player.gui.screen.add{ type = "frame", name = "wdp_msg_popup", direction = "vertical" }
+  local popup = player.gui.screen.add{
+    type = "frame",
+    name = "wdp_msg_popup",
+    direction = "vertical"
+  }
   popup.auto_center = true
-  popup.style.width = 520
+  popup.style.width = 430
 
-  local titlebar = popup.add{ type = "flow", direction = "horizontal" }
+  local titlebar = popup.add{
+    type = "flow",
+    direction = "horizontal"
+  }
   titlebar.drag_target = popup
 
   local title = titlebar.add{
@@ -2380,17 +3827,24 @@ local function open_message_popup(player, seg_idx, rule_idx)
     tooltip = "Close"
   }
 
-  popup.add{ type = "line" }
-
-  local body = popup.add{ type = "frame", name = "wdp_msg_body", direction = "vertical" }
-  body.style.top_padding = 10
-  body.style.bottom_padding = 10
+  local body = popup.add{
+    type = "frame",
+    name = "wdp_msg_body",
+    direction = "vertical",
+    style = "inside_shallow_frame"
+  }
+  body.style.top_padding = 8
+  body.style.bottom_padding = 8
   body.style.left_padding = 10
   body.style.right_padding = 10
 
-  local icon_row = body.add{ type = "flow", name = "wdp_msg_insert_row", direction = "horizontal" }
-  icon_row.style.horizontal_spacing = 8
-  icon_row.style.bottom_margin = 8
+  local icon_row = body.add{
+    type = "flow",
+    name = "wdp_msg_insert_row",
+    direction = "horizontal"
+  }
+  icon_row.style.horizontal_spacing = 6
+  icon_row.style.bottom_margin = 6
   icon_row.style.vertical_align = "center"
 
   local open_btn = icon_row.add{
@@ -2403,14 +3857,23 @@ local function open_message_popup(player, seg_idx, rule_idx)
   open_btn.style.width = 28
   open_btn.style.height = 28
 
-  local text = body.add{ type = "text-box", name = "wdp_msg_text", text = rule.message or "" }
-  text.style.width = 480
-  text.style.height = 140
+  local text = body.add{
+    type = "text-box",
+    name = "wdp_msg_text",
+    text = rule.message or ""
+  }
+  text.style.width = 390
+  text.style.height = 110
 
-  local footer = popup.add{ type = "flow", direction = "horizontal" }
+  local footer = popup.add{
+    type = "flow",
+    direction = "horizontal"
+  }
   footer.style.top_margin = 6
+
   local footer_spacer = footer.add{ type = "empty-widget" }
   footer_spacer.style.horizontally_stretchable = true
+
   local ok_btn = footer.add{
     type = "sprite-button",
     name = "wdp_msg_apply",
@@ -2514,6 +3977,20 @@ local function open_panel_gui(player, panel)
   body.style.left_padding = 10
   body.style.right_padding = 10
 
+  local signal_bar_holder = frame.add{
+    type = "frame",
+    name = "wdp_signal_bar_holder",
+    direction = "vertical",
+    style = "inside_shallow_frame"
+  }
+  signal_bar_holder.style.horizontally_stretchable = true
+  signal_bar_holder.style.top_margin = 4
+  signal_bar_holder.style.bottom_margin = 0
+  signal_bar_holder.style.top_padding = 5
+  signal_bar_holder.style.bottom_padding = 5
+  signal_bar_holder.style.left_padding = 2
+  signal_bar_holder.style.right_padding = 2
+
   local footer = frame.add{ type = "flow", name = "wdp_footer", direction = "horizontal" }
   footer.style.top_margin = 6
   local footer_spacer = footer.add{ type = "empty-widget" }
@@ -2558,6 +4035,58 @@ script.on_event(defines.events.on_gui_click, function(event)
 
   local name = el.name
 
+  if name == "wdp_icon_signal" or name == "wdp_first_signal" then
+    local player = game.get_player(event.player_index)
+    if not (player and player.valid) then return end
+
+    local state = get_gui_state(player.index)
+    if not state then return end
+
+    local panel = get_panel_from_gui_state(state)
+    if not (panel and panel.valid) then return end
+
+    local tags = event.element.tags or {}
+    local seg_idx = tonumber(tags.segment_index)
+    local rule_idx = tonumber(tags.rule_index)
+    if not (seg_idx and rule_idx) then return end
+
+    open_signal_picker(player, panel, seg_idx, rule_idx, name)
+    return
+  end
+
+  if name == "wdp_signal_picker_close" or name == "wdp_signal_picker_clear" then
+    local player = game.get_player(event.player_index)
+    if not (player and player.valid) then return end
+
+    local state = get_gui_state(player.index)
+    if not state or not state.signal_picker then
+      destroy_signal_picker(player)
+      return
+    end
+
+    if name == "wdp_signal_picker_clear" then
+      local panel = get_panel_from_gui_state(state)
+      if panel and panel.valid then
+        local pdata = ensure_panel_segment_data(panel)
+        if pdata then
+          local sp = state.signal_picker
+          local seg = pdata.segments[sp.segment_index]
+          local rule = seg and seg.rules[sp.rule_index]
+          if rule then
+            rule[sp.field_name] = nil
+            persist_panel_config(panel)
+            global.wdp.last_render_hash[panel.unit_number] = nil
+            global.wdp.chart_tag_hash[panel.unit_number] = nil
+            refresh_live_panel_preview(player)
+          end
+        end
+      end
+    end
+
+    destroy_signal_picker(player)
+    return
+  end
+
   if name == "wdp_close" then
     apply_gui_to_segment(player)
     destroy_main_gui(player)
@@ -2567,6 +4096,39 @@ script.on_event(defines.events.on_gui_click, function(event)
   if name == "wdp_confirm" then
     apply_gui_to_segment(player)
     destroy_main_gui(player)
+    return
+  end
+  
+    if name == "wdp_smart_arithmetic_a_placeholder"
+      or name == "wdp_smart_arithmetic_b_placeholder"
+      or name == "wdp_smart_decider_placeholder" then
+    local state = get_gui_state(player.index)
+    if not state then return end
+
+    local panel = get_panel_from_gui_state(state)
+    if not (panel and panel.valid) then return end
+
+    local pdata = ensure_panel_segment_data(panel)
+    if not pdata then return end
+
+    local seg_idx = state.active_tab or 1
+    local seg = pdata.segments[seg_idx]
+    if not seg then return end
+
+    local kind
+    if name == "wdp_smart_arithmetic_a_placeholder" then kind = "arithmetic_a"
+    elseif name == "wdp_smart_arithmetic_b_placeholder" then kind = "arithmetic_b"
+    else kind = "decider" end
+
+    local ref = get_segment_smart_ref(seg, kind)
+
+    if not ref then return end
+
+    local ent = get_registered_smart_combinator(ref)
+    if ent and ent.valid then
+      state.opening_smart_combinator = true
+      player.opened = ent
+    end
     return
   end
 
@@ -2608,6 +4170,7 @@ script.on_event(defines.events.on_gui_click, function(event)
     paste_active_segment(player)
     return
   end
+
 
   if name == "wdp_add_rule" then
     local state = get_gui_state(player.index)
@@ -2786,61 +4349,129 @@ script.on_event(defines.events.on_gui_elem_changed, function(event)
   end
 end)
 
-script.on_event(defines.events.on_gui_text_changed, function(event)
-  local player = game.get_player(event.player_index)
-  if not player then return end
-
-  local el = event.element
-  if not (el and el.valid) then return end
-
-  if el.name == "wdp_rhs_constant_text" then
-    local popup = player.gui.screen.wdp_rhs_popup
-    if popup and popup.valid and popup.wdp_rhs_body and popup.wdp_rhs_body.valid then
-      local row = popup.wdp_rhs_body.wdp_rhs_constant_row
-      if row and row.valid and row.wdp_rhs_constant_apply and row.wdp_rhs_constant_apply.valid then
-        row.wdp_rhs_constant_apply.enabled = safe_number_text(el.text) ~= nil
-      end
-    end
-    return
-  end
-
-  if el.name == "wdp_msg_text" then
-    apply_message_popup(player)
-    refresh_live_panel_preview(player, true)
-    return
-  end
-end)
-
-script.on_event(defines.events.on_gui_selection_state_changed, function(event)
-  local player = game.get_player(event.player_index)
-  if not player then return end
-
-  local el = event.element
-  if not (el and el.valid) then return end
-
-  if el.name == "wdp_comparator" then
-    apply_gui_to_segment(player)
-    refresh_main_gui(player)
-  end
-end)
-
 script.on_event(defines.events.on_gui_checked_state_changed, function(event)
   local player = game.get_player(event.player_index)
-  if not player then return end
+  if not (player and player.valid) then return end
 
   local el = event.element
   if not (el and el.valid) then return end
 
-  if el.name == "wdp_show_in_chart" or el.name == "wdp_show_in_alt_mode" then
+  local name = el.name
+
+  if name == "wdp_show_in_chart" or name == "wdp_show_in_alt_mode" then
     apply_gui_to_segment(player)
     refresh_live_panel_preview(player)
     refresh_main_gui(player)
+    return
+  end
+
+  if name ~= "wdp_enable_smart_logic_placeholder"
+    and name ~= "wdp_smart_arithmetic_a_check_placeholder"
+    and name ~= "wdp_smart_arithmetic_b_check_placeholder"
+    and name ~= "wdp_smart_decider_check_placeholder"
+  then
+    return
+  end
+
+  local state = get_gui_state(player.index)
+  if not state then return end
+
+  local panel = get_panel_from_gui_state(state)
+  if not (panel and panel.valid) then return end
+
+  local pdata = ensure_panel_segment_data(panel)
+  if not pdata then return end
+
+  local seg_idx = state.active_tab or 1
+  local seg = pdata.segments[seg_idx]
+  if not seg then return end
+
+  if name == "wdp_enable_smart_logic_placeholder" then
+    seg.smart.enabled = (el.state == true)
+
+    if not seg.smart.enabled then
+      seg.smart.arithmetic_a.enabled = false
+      seg.smart.arithmetic_b.enabled = false
+      seg.smart.decider.enabled = false
+      destroy_segment_smart_combinator(seg, "arithmetic_a")
+      destroy_segment_smart_combinator(seg, "arithmetic_b")
+      destroy_segment_smart_combinator(seg, "decider")
+    end
+
+    persist_panel_config(panel)
+    refresh_main_gui(player)
+    return
+  end
+
+  if name == "wdp_smart_arithmetic_a_check_placeholder"
+      or name == "wdp_smart_arithmetic_b_check_placeholder"
+      or name == "wdp_smart_decider_check_placeholder" then
+    local kind
+    if name == "wdp_smart_arithmetic_a_check_placeholder" then kind = "arithmetic_a"
+    elseif name == "wdp_smart_arithmetic_b_check_placeholder" then kind = "arithmetic_b"
+    else kind = "decider" end
+
+    local enabled = (el.state == true)
+
+    if not seg.smart.enabled and enabled then
+      seg.smart.enabled = true
+    end
+
+    seg.smart[kind].enabled = enabled
+
+    -- When arithmetic_b is unchecked, also disable arithmetic_a
+    -- since it has no path to the segment without arithmetic_b.
+    if kind == "arithmetic_b" and not enabled then
+      seg.smart.arithmetic_a.enabled = false
+      local ref_a = get_segment_smart_ref(seg, "arithmetic_a")
+      local ent_a = ref_a and get_registered_smart_combinator(ref_a) or nil
+      if ent_a and ent_a.valid then ent_a.active = false end
+    end
+
+    -- Create entity if first enable; leave alive on disable to preserve config.
+    local ref = get_segment_smart_ref(seg, kind)
+    local ent = ref and get_registered_smart_combinator(ref) or nil
+    if not ent then
+      ent = create_smart_combinator(panel, seg_idx, kind)
+      if ent and ent.valid then
+        set_segment_smart_ref(seg, kind, ent.unit_number)
+      end
+    end
+
+    if ent and ent.valid then
+      ent.active = enabled
+    end
+
+    persist_panel_config(panel)
+    refresh_main_gui(player)
+    return
   end
 end)
 
 script.on_event(defines.events.on_gui_closed, function(event)
   local player = game.get_player(event.player_index)
   if not player then return end
+
+  local state = get_gui_state(player.index)
+
+  -- A smart combinator GUI was closed while wdp_main is still open.
+  -- Re-focus the main panel GUI so the player isn't left with nothing.
+  if event.entity and event.entity.valid
+      and (event.entity.name == "wdp-smart-arithmetic"
+           or event.entity.name == "wdp-smart-decider")
+  then
+    if state then
+      state.opening_smart_combinator = nil
+      local panel = get_panel_from_gui_state(state)
+      if panel and panel.valid then
+        local frame = player.gui.screen.wdp_main
+        if frame and frame.valid then
+          player.opened = frame
+        end
+      end
+    end
+    return
+  end
 
   if event.element and event.element.valid then
     if event.element.name == "wdp_rhs_popup" then
@@ -2859,6 +4490,13 @@ script.on_event(defines.events.on_gui_closed, function(event)
     end
 
     if event.element.name == "wdp_main" then
+      -- If we're in the middle of opening a smart combinator,
+      -- the main GUI close was triggered by Factorio swapping
+      -- player.opened -- don't destroy it.
+      if state and state.opening_smart_combinator then
+        return
+      end
+
       apply_gui_to_segment(player)
       refresh_live_panel_preview(player)
       destroy_main_gui(player)
@@ -2925,6 +4563,7 @@ local function on_removed(event)
 end
 
 script.on_init(function()
+  get_or_create_hidden_surface()
   scan_all_existing()
 end)
 
@@ -2954,11 +4593,45 @@ end)
 script.on_nth_tick(2, tick_merge)
 
 ------------------------------------------------------------
--- Remote interface for DSC
+-- Native settings copy/paste  (Ctrl-C pipette → Ctrl-V)
 ------------------------------------------------------------
 
+-- on_pre_entity_settings_pasted fires when the player picks
+-- up settings from a source entity (Ctrl-C with the tool).
+-- We use it to capture the panel state and play a sound so
+-- the player gets feedback, matching vanilla combinator feel.
+script.on_event(defines.events.on_pre_entity_settings_pasted, function(event)
+  local player = game.get_player(event.player_index)
+  if not (player and player.valid) then return end
+
+  local src = event.entity
+  if not is_panel(src) then return end
+
+  copy_panel(player, src)
+
+  -- Audio cue: same sound vanilla uses for entity copy.
+  player.play_sound{ path = "utility/copied" }
+end)
+
+-- on_entity_settings_pasted fires when the player pastes
+-- onto a destination entity (Ctrl-V with the tool).
+script.on_event(defines.events.on_entity_settings_pasted, function(event)
+  local player = game.get_player(event.player_index)
+  if not (player and player.valid) then return end
+
+  local src = event.source
+  local dst = event.destination
+
+  -- Both entities must be widescreen display panels.
+  if not (is_panel(src) and is_panel(dst)) then return end
+
+  -- paste_panel with a live source rebuilds the clip from the
+  -- source entity, ensuring the freshest state is captured.
+  paste_panel(player, src, dst)
+end)
+
 ------------------------------------------------------------
--- Remote interface for Display Signal Counts
+-- Remote interface for Signal Display
 ------------------------------------------------------------
 
 remote.add_interface("WidescreenDisplayPanels", {

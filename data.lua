@@ -1,5 +1,6 @@
+require("prototypes.widescreen-display-panel")
 require("prototypes.widescreen-display-panel-item")
 require("prototypes.widescreen-display-panel-remnants")
 require("prototypes.widescreen-display-panel-connector")
-require("prototypes.widescreen-display-panel")
+require("prototypes.widescreen-display-panel-logic")
 require("prototypes.gui-sprites")

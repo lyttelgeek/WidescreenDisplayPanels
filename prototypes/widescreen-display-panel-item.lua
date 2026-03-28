@@ -38,7 +38,6 @@ local PANEL_DEFS = {
   { name = "widescreen-display-panel-2x1", multiplier = 2, overlay_icon = "2x1.png", order_suffix = "-0[2x1]" },
   { name = "widescreen-display-panel-3x1", multiplier = 3, overlay_icon = "3x1.png", order_suffix = "-1[3x1]" },
   { name = "widescreen-display-panel-4x1", multiplier = 4, overlay_icon = "4x1.png", order_suffix = "-2[4x1]" },
-
   { name = "widescreen-display-panel-1x2", multiplier = 2, overlay_icon = "1x2.png", order_suffix = "-3[1x2]" },
   { name = "widescreen-display-panel-1x3", multiplier = 3, overlay_icon = "1x3.png", order_suffix = "-4[1x3]" },
   { name = "widescreen-display-panel-1x4", multiplier = 4, overlay_icon = "1x4.png", order_suffix = "-5[1x4]" },
@@ -82,6 +81,37 @@ local function make_item_and_recipe(def)
   scale_ingredients(recipe.ingredients, multiplier)
   if recipe.normal then scale_ingredients(recipe.normal.ingredients, multiplier) end
   if recipe.expensive then scale_ingredients(recipe.expensive.ingredients, multiplier) end
+
+  -- Add 3 combinator sets per segment (arithmetic, decider, constant).
+  -- Each combinator costs 5 copper wire + 5 electronic circuit,
+  -- so 3 combinators = 15 copper wire + 15 electronic circuit per segment.
+  local function add_combinator_ingredients(ingredients)
+    if not ingredients then return end
+    local copper_added = false
+    local circuit_added = false
+    for _, ing in ipairs(ingredients) do
+      if ing.name == "copper-cable" or ing[1] == "copper-cable" then
+        if ing.amount then ing.amount = ing.amount + 15 * multiplier
+        else ing[2] = ing[2] + 15 * multiplier end
+        copper_added = true
+      end
+      if ing.name == "electronic-circuit" or ing[1] == "electronic-circuit" then
+        if ing.amount then ing.amount = ing.amount + 15 * multiplier
+        else ing[2] = ing[2] + 15 * multiplier end
+        circuit_added = true
+      end
+    end
+    if not copper_added then
+      table.insert(ingredients, { type = "item", name = "copper-cable", amount = 15 * multiplier })
+    end
+    if not circuit_added then
+      table.insert(ingredients, { type = "item", name = "electronic-circuit", amount = 15 * multiplier })
+    end
+  end
+
+  add_combinator_ingredients(recipe.ingredients)
+  if recipe.normal then add_combinator_ingredients(recipe.normal.ingredients) end
+  if recipe.expensive then add_combinator_ingredients(recipe.expensive.ingredients) end
 
   data:extend({ recipe })
 end
