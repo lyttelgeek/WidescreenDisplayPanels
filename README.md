@@ -33,7 +33,7 @@ Adds 2x1, 3x1, and 4x1 widescreen and tallscreen variants of the vanilla display
 
 ## Integration
 
-- Fully integrated with Display Signal Counts mod:
+- Fully integrated with [Display Signal Counts](https://github.com/lyttelgeek/DisplaySignalCounts) mod:
 
 ![signalcounts](thumbnail3.png)
 
