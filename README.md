@@ -4,6 +4,8 @@
 
 Adds 2x1, 3x1, and 4x1 widescreen and tallscreen variants of the vanilla display panel, designed for cleaner dashboards and improved readability/organisation in circuit network setups.
 
+---
+
 ## Features
 
 - Three new panel sizes in two orientations:
