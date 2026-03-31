@@ -31,11 +31,15 @@ Adds 2x1, 3x1, and 4x1 widescreen and tallscreen variants of the vanilla display
 
 - Copy and paste segment configurations between panels
 
+---
+
 ## Integration
 
 - Fully integrated with [Display Signal Counts](https://github.com/lyttelgeek/DisplaySignalCounts) mod:
 
 ![signalcounts](thumbnail3.png)
+
+---
 
 ## Usage
 
@@ -47,6 +51,8 @@ Each panel is divided into horizontal/vertical segments depending on its length.
 - Can optionally display in alt-mode
 - Can optionally create a chart tag
 
+---
+
 ## Wiring
 
 - The **top** and **left side** of the panel functions as the circuit input on the **vertical** and **horizontal** screens respectively.
@@ -54,11 +60,15 @@ Each panel is divided into horizontal/vertical segments depending on its length.
 
 This allows panels to act as both display and passthrough components in circuit networks.
 
+---
+
 ## Smart Logic
 
 ![smartgui](gui.png)
 
 Each segment has an optional smart logic system, accessible via the segment GUI. This allows signals to be transformed by combinators before being evaluated against display rules.
+
+---
 
 **Signal flow:** panel input → Arithmetic A → Arithmetic B → display rules
 
@@ -68,6 +78,8 @@ Each segment has an optional smart logic system, accessible via the segment GUI.
 
 Clicking the combinator icon button opens the native Factorio combinator GUI for full configuration. Combinator configuration is preserved when toggling on/off; only the master toggle destroys combinators.
 
+---
+
 ## Copy and Paste
 
 Segments and panels can be copied and pasted:
@@ -76,6 +88,8 @@ Segments and panels can be copied and pasted:
 - Paste onto another segment/panel
 - Copy a configured full panel
 - Paste onto another panel (extra segments discarded/ignored)
+
+---
 
 ## Recipes
 
@@ -87,14 +101,20 @@ All panels require raw combinator ingredients in addition to the base display pa
 | 3×1 / 1×3 | 3 | 48 | 45 |
 | 4×1 / 1×4 | 4 | 64 | 60 |
 
+---
+
 ## Unlocking
 
 All widescreen panels are unlocked alongside the vanilla display panel via circuit network research.
+
+---
 
 ## Notes
 
 - Panels are fixed to north-facing orientation
 - Behaviour is intentionally aligned with vanilla display panels where possible
+
+---
 
 ## Compatibility
 
@@ -103,10 +123,14 @@ All widescreen panels are unlocked alongside the vanilla display panel via circu
 - Compatible with most mods that interact with display panels or circuit networks
 - Features remote integration with [Display Signal Counts](https://github.com/lyttelgeek/DisplaySignalCounts)
 
+---
+
 ## Known limitations
 
 - No direct copy/paste from vanilla display panels
 - Panels are fixed orientation (no flipping/rotating)
+
+---
 
 ## Current Version
 
