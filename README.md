@@ -1,5 +1,6 @@
 # Widescreen Display Panels
 
+![Panels](thumbnail.png)
 
 Adds 2x1, 3x1, and 4x1 widescreen and tallscreen variants of the vanilla display panel, with built-in combinators. Designed for cleaner dashboards and improved readability/organisation in circuit network setups.
 
@@ -36,7 +37,9 @@ Adds 2x1, 3x1, and 4x1 widescreen and tallscreen variants of the vanilla display
 
 ## Integration
 
-- Fully integrated with [Display Signal Counts](https://github.com/lyttelgeek/DisplaySignalCounts) mod
+- Fully integrated with [Display Signal Counts](https://github.com/lyttelgeek/DisplaySignalCounts) mod:
+
+![Counts](thumbnail2.png)
 
 ---
 
@@ -62,7 +65,9 @@ These ports allow panels to act as bidirectional passthrough components in circu
 
 ## Smart Logic
 
-Each segment has an optional smart logic system, accessible via the segment GUI. This allows signals to be transformed by combinators before being evaluated against display rules.
+Each segment has an optional smart logic system, accessible via the segment GUI. This allows signals to be transformed by combinators before being evaluated against display rules:
+
+![GUI](gui.png)
 
 **Signal flow:** panel input → Arithmetic A → Arithmetic B → display rules
 
@@ -118,5 +123,11 @@ Segments and panels can be copied and pasted, including any smart logic configur
 
 - No direct copy/paste from vanilla display panels
 - Panels are fixed orientation (no flipping/rotating)
+
+---
+
+## Current Version
+
+[v1.2.1 - Wired Panel Patch](https://github.com/lyttelgeek/SpaceConnectionSignals/releases/tag/1.2.1-Wired_Panel_Patch)
 
 ---
