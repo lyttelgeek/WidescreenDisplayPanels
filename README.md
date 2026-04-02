@@ -92,7 +92,7 @@ Segments and panels can be copied and pasted, including any smart logic configur
 
 ## Unlocking and Recipe
 
-- All new panels are unlocked alongside the vanilla the display panel and combinators via circuit network research.
+- All new panels are unlocked alongside the vanilla display panel and combinators via circuit network research.
 - All panels require raw combinator ingredients in addition to the base display panel ingredients:
 
 | Panel | Iron plate | Electronic circuit | Copper wire |
