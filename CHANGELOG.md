@@ -10,7 +10,7 @@
 - Slightly increased main window width
 - Moved smart logic control to vanilla-style "circuit network" pop-out sub-window
 - Tweaked signal bar to as closely match vanilla combinator gui as possible
-- Removed but one custom gui button sprite
+- Removed all but one custom gui button sprite
 
 ### Fixes:
 - Fixed remnants spawning and ports remaining when mining panels on space platforms
