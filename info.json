@@ -1,10 +1,10 @@
 {
   "name": "WidescreenDisplayPanels",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "title": "Widescreen Display Panels",
   "author": "Nzungu",
   "homepage": "",
-  "description": "Adds 2x1, 3x1 and 4x1 widescreen/tallscreen display panels based on the vanilla display panel. Designed for cleaner circuit dashboards and logistic displays.",
+  "description": "Adds 2x1, 3x1 and 4x1 widescreen and tallscreen display panels with in-built combinators.",
   "factorio_version": "2.0",
   "dependencies": [
     "base >= 2.0.0"

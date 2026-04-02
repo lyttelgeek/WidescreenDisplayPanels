@@ -1,5 +1,24 @@
 # Changelog
 
+
+## 1.2.1 - Wired Ports Patch
+
+### Features:
+- "Output" ports now directly wired to panels' "input" sides, enabling bidirectional passthrough and signal input from either side
+
+### UI:
+- Slightly increased main window width
+- Moved smart logic control to vanilla-style "circuit network" pop-out sub-window
+- Tweaked signal bar to as closely match vanilla combinator gui as possible
+- Removed but one custom gui button sprite
+
+### Fixes:
+- Fixed remnants spawning and ports remaining when mining panels on space platforms
+- Changed right/bottom ports to direct input wiring to better prevent count looping and enable input from either side (removed 'write_const')
+- Fixed quality overlays not appearing on signal bar
+
+---
+
 ## 1.2.0 - Smartscreen Update
 
 ### Features

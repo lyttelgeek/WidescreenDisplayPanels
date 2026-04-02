@@ -99,8 +99,9 @@ end
 
 --[[
   Runtime responsibilities:
-  - Attach and maintain helper connector entities for widescreen panels
-  - Merge panel circuit-network signals and mirror them to the hidden helper port
+  - Attach and maintain hidden smart combinator and feeder entities on a hidden surface
+  - Attach and maintain output port connector entities for widescreen panels
+  - Merge panel circuit-network signals and feed them to smart combinators each tick
   - Evaluate per-segment rule stacks and render icon/message output
   - Provide chart-tag, hover-preview, and GUI editing behaviour
   - Expose merged signals for Signal Display compatibility
@@ -134,6 +135,7 @@ local function ensure_global()
   ------------------------------------------------------------
   -- Smart combinator registry
   ------------------------------------------------------------
+  
   global.wdp.smart = global.wdp.smart or {}
   global.wdp.smart.combinators = global.wdp.smart.combinators or {}
 end
@@ -143,6 +145,7 @@ end
 -- combinators). Spawning them here keeps their wire
 -- connection triangles off the player's surfaces entirely.
 ------------------------------------------------------------
+
 local HIDDEN_SURFACE_NAME = "wdp-hidden"
 
 local function get_or_create_hidden_surface()
@@ -155,9 +158,6 @@ local function get_or_create_hidden_surface()
     autoplace_controls = {},
   })
 end
-------------------------------------------------------------
--- Entity / panel helpers
-------------------------------------------------------------
 
 ------------------------------------------------------------
 -- Smart combinator helpers
@@ -252,6 +252,7 @@ local function create_smart_combinator(panel, seg_index, kind)
 -- the red/green split the player wired to the panel.
 -- Neither feeder is connected to the player's network.
 ------------------------------------------------------------
+
   local function make_feeder(offset_x, offset_y, feeder_wire_id, comb_connector_id)
     local f = hidden_surface.create_entity{
       name = "wdp-smart-feeder",
@@ -281,6 +282,7 @@ local function create_smart_combinator(panel, seg_index, kind)
   ent.minable = false
   ent.rotatable = false
   ent.operable = true
+
 
   register_smart_combinator(ent, panel, seg_index, kind)
 
@@ -549,6 +551,7 @@ local function ensure_panel_segment_data(panel)
     ------------------------------------------------------------
     -- Smart logic data model
     ------------------------------------------------------------
+	
     seg.smart = seg.smart or {}
 
     if seg.smart.enabled == nil then
@@ -788,6 +791,7 @@ end
 -- working from the segment data.  Call this BEFORE clearing
 -- segment_data so the entity_unit_numbers are still valid.
 ------------------------------------------------------------
+
 local function destroy_all_panel_smart_combinators(unit_number)
   local segdata = global.wdp.segment_data[unit_number]
   if not segdata or not segdata.segments then return end
@@ -822,8 +826,7 @@ local function detach_ports_by_unit(unit_number, keep_settings)
   global.wdp.cache[unit_number] = nil
   global.wdp.last_output_hash[unit_number] = nil
 
-  -- Always destroy smart combinators regardless of keep_settings,
-  -- since the entities themselves must not outlive the panel.
+  -- Always destroy smart combinators regardless of keep_settings, since the entities themselves must not outlive the panel.
   destroy_all_panel_smart_combinators(unit_number)
 
   if not keep_settings then
@@ -873,9 +876,7 @@ local function make_ports_for_panel(panel)
     return nil
   end
 
-  -- Wire the port to the panel on both colours so downstream entities
-  -- wired to the port share the panel's input network directly.
-  -- Replaces write_const; direct port wiring avoids signal doubling.
+  -- Script-wire the port to the panel on both colours so the port shares the panel's input network. Downstream entities wired to the port see the same signals as the panel input.
   local port_red  = output.get_wire_connector(defines.wire_connector_id.circuit_red,  true)
   local panel_red = panel.get_wire_connector(defines.wire_connector_id.circuit_red,   true)
   if port_red and panel_red then
@@ -943,6 +944,7 @@ local function ensure_panel_runtime(panel)
   -- segment data still marks them as enabled) missing combinators
   -- are re-spawned so the refs stay valid.
   ------------------------------------------------------------
+  
   local segdata = global.wdp.segment_data[unit]
   if segdata and segdata.segments then
     for seg_idx, seg in ipairs(segdata.segments) do
@@ -953,7 +955,7 @@ local function ensure_panel_runtime(panel)
             local ref = smart_slot.entity_unit_number
             local ent = ref and get_registered_smart_combinator(ref) or nil
             if not ent then
-              -- Entity is missing -- respawn it.
+              -- If entity is missing then respawn it.
               ent = create_smart_combinator(panel, seg_idx, kind)
               if ent and ent.valid then
                 smart_slot.entity_unit_number = ent.unit_number
@@ -977,8 +979,13 @@ end
 local function add_signals(dst, sigs)
   if not sigs then return end
   for _, s in ipairs(sigs) do
-    if s.signal and s.signal.name and s.signal.type then
-      local stype = normalize_signal_type_internal(s.signal.type)
+    if s.signal and s.signal.name then
+      -- In Factorio 2.0, item signals have type = nil when read from the network.
+      local stype = s.signal.type
+      if not stype or stype == "" then
+        stype = infer_signal_type_from_name(s.signal.name) or "item"
+      end
+      stype = normalize_signal_type_internal(stype)
       local quality = s.signal.quality or "normal"
       local key = stype .. ":" .. s.signal.name .. ":" .. quality
       dst[key] = (dst[key] or 0) + (s.count or 0)
@@ -1196,8 +1203,7 @@ local function make_render_hash_from_match(seg_cfg, match)
   }, "|")
 end
 
--- Convenience wrapper for callers that don't have a pre-computed match
--- (used by the hover-render path).
+-- Convenience wrapper for callers that don't have a pre-computed match (used by the hover-render path).
 local function make_render_hash(seg_cfg, merged_tbl)
   local match = evaluate_segment_rules(seg_cfg, merged_tbl)
   return make_render_hash_from_match(seg_cfg, match)
@@ -1216,8 +1222,7 @@ local function get_panel_networks(panel)
   end
 
   -- Use entity-direct API only (Factorio 2.0).
-  -- The old behavior.get_circuit_network path can return a different
-  -- network object for the same connector, causing double-counting.
+  -- The old behavior.get_circuit_network path can return a different network object for the same connector, causing double-counting.
   local ok_r, net_r = pcall(function()
     return panel.get_circuit_network(defines.wire_connector_id.circuit_red)
   end)
@@ -1246,6 +1251,7 @@ end
 -- Read all circuit-network signals visible to a panel and
 -- return them as both a flat key->count table and an array.
 ------------------------------------------------------------
+
 local function compute_merged_for_panel(panel)
   if not (panel and panel.valid and panel.unit_number) then
     return {}, {}
@@ -1260,12 +1266,13 @@ end
 -- Read a smart combinator's computed output into a flat
 -- key->count table.
 --
--- We use signals_last_tick from LuaCombinatorControlBehavior
+-- Use signals_last_tick from LuaCombinatorControlBehavior
 -- which gives the signals the combinator *output* last tick
--- directly -- no need to read a circuit network at all.
+-- directly: no need to read a circuit network at all.
 -- This works regardless of whether the output connectors
 -- are wired to anything.
 ------------------------------------------------------------
+
 local function read_combinator_output_to_table(ent)
   local out = {}
   if not (ent and ent.valid) then return out end
@@ -1288,6 +1295,7 @@ end
 -- Merge two flat key->count tables.
 -- high_tbl wins on key collision (decider > arithmetic).
 ------------------------------------------------------------
+
 local function merge_signal_tables_with_priority(low_tbl, high_tbl)
   local out = {}
   for k, v in pairs(low_tbl  or {}) do out[k] = v end
@@ -1303,6 +1311,7 @@ end
 --   (decider wins on collision).
 -- Falls back to raw panel input if nothing produces output.
 ------------------------------------------------------------
+
 local function compute_smart_output_for_segment(panel, seg)
   local raw_tbl, raw_arr = compute_merged_for_panel(panel)
 
@@ -1310,8 +1319,7 @@ local function compute_smart_output_for_segment(panel, seg)
     return raw_tbl, raw_arr
   end
 
-  -- arithmetic_b reads from arithmetic_a output (if arithmetic_a enabled),
-  -- otherwise reads raw panel input via its feeders.
+  -- arithmetic_b reads from arithmetic_a output (if arithmetic_a enabled), otherwise reads raw panel input via its feeders.
   local arithmetic_b_tbl = {}
   if seg.smart.arithmetic_b
       and seg.smart.arithmetic_b.enabled
@@ -1578,9 +1586,8 @@ local function ensure_render_bucket(panel_unit)
   return global.wdp.render_objects[panel_unit], global.wdp.last_render_hash[panel_unit]
 end
 
--- smart_tbl_cache: optional table[seg_idx] -> pre-computed effective signal
--- table for smart segments.  Built once per tick in update_panel_render and
--- passed down to avoid re-reading combinator outputs per segment.
+-- smart_tbl_cache: optional table[seg_idx] -> pre-computed effective signal table for smart segments.
+-- Built once per tick in update_panel_render and passed down to avoid re-reading combinator outputs per segment. 
 local function render_segment(panel, panel_unit, seg_idx, seg_cfg, merged_tbl, segment_count, smart_tbl_cache)
   local bucket, hash_bucket = ensure_render_bucket(panel_unit)
 
@@ -1590,6 +1597,7 @@ local function render_segment(panel, panel_unit, seg_idx, seg_cfg, merged_tbl, s
   -- fall back to computing it now (e.g. direct calls outside
   -- the tick loop).
   ------------------------------------------------------------
+  
   local effective_tbl
   if smart_tbl_cache and smart_tbl_cache[seg_idx] then
     effective_tbl = smart_tbl_cache[seg_idx]
@@ -1831,6 +1839,7 @@ local function update_panel_render(panel, panel_unit, merged_tbl)
   -- Build smart output cache: one combinator read per enabled
   -- segment, shared across this entire render pass.
   ------------------------------------------------------------
+  
   local smart_tbl_cache = nil
   for seg_idx = 1, pdata.segment_count do
     local seg = pdata.segments[seg_idx]
@@ -1861,6 +1870,7 @@ end
 -- Update smart combinator feeders for a panel.
 -- Called each tick so combinators always see current signals.
 ------------------------------------------------------------
+
 local function update_smart_feeders_for_panel(panel, panel_unit)
   ensure_global()
   local segdata = global.wdp.segment_data[panel_unit]
@@ -2037,7 +2047,7 @@ end
 ------------------------------------------------------------
 
 -- Returns red_tbl, green_tbl -- signal tables split by wire colour.
--- When a sub-combinator is active and producing output, its result
+-- When a smart combinator is active and producing output, its result
 -- is returned on both wires (combinators output on both red and green).
 local function get_active_segment_signals_by_wire(panel, player_index)
   local state = get_gui_state(player_index)
@@ -2062,10 +2072,8 @@ local function get_active_segment_signals_by_wire(panel, player_index)
     return t
   end
 
-  -- If a sub-combinator is enabled and producing output, show that on
-  -- both wires (combinators output on both red and green).
-  -- The master toggle alone does not change signals -- only an enabled
-  -- sub-combinator with active output does.
+  -- If a smart combinator is enabled and producing output, show that on both wires (combinators output on both red and green).
+  -- The master toggle alone does not change signals: only an enabled smart combinator does.
   local any_sub_enabled = seg and seg.smart and seg.smart.enabled and (
     (seg.smart.arithmetic_a and seg.smart.arithmetic_a.enabled) or
     (seg.smart.arithmetic_b and seg.smart.arithmetic_b.enabled) or
@@ -2106,9 +2114,10 @@ local function add_signal_row(parent, row_name, slot_style, entries)
 
     parent[row_name].add{
       type    = "sprite-button",
-      name    = "wdp_sigbar_" .. entry.key,
+      name    = "wdp_sigbar" .. entry.key,
       style   = slot_style,
       sprite  = sprite_path,
+	  quality = quality,
       tooltip = name .. ": " .. format_si_compact(entry.count),
       number  = entry.count,
     }
@@ -2128,8 +2137,7 @@ rebuild_signal_bar = function(frame, panel, player_index)
   local body = frame.wdp_body
   if not (body and body.valid) then return end
 
-  -- Destroy and re-add holder and footer so they are always
-  -- the last children of body, regardless of rebuild order.
+  -- Destroy and re-add holder and footer so they are always the last children of body, regardless of rebuild order. 
   if body.wdp_signal_bar_holder and body.wdp_signal_bar_holder.valid then
     body.wdp_signal_bar_holder.destroy()
   end
@@ -2138,24 +2146,19 @@ rebuild_signal_bar = function(frame, panel, player_index)
   end
 
   local holder = body.add{
-    type = "frame",
+    type = "flow",
     name = "wdp_signal_bar_holder",
     direction = "vertical",
-    style = "inside_shallow_frame"
   }
   holder.style.horizontally_stretchable = true
-  holder.style.top_margin = 4
-  holder.style.bottom_margin = 0
-  holder.style.top_padding = 5
-  holder.style.bottom_padding = 5
-  holder.style.left_padding = 2
-  holder.style.right_padding = 2
+  holder.style.padding = 0
+  holder.style.vertical_spacing = 0
 
   local footer = body.add{ type = "flow", name = "wdp_footer", direction = "horizontal" }
   footer.style.top_margin = 6
   local footer_spacer = footer.add{ type = "empty-widget" }
   footer_spacer.style.horizontally_stretchable = true
-  local confirm_btn = footer.add{ type = "sprite-button", name = "wdp_confirm", sprite = "wdp_gui_confirm", hovered_sprite = "wdp_gui_confirm_hover", clicked_sprite = "wdp_gui_confirm_onclick", disabled_sprite = "wdp_gui_confirm_disabled", tooltip = "Apply and close" }
+  local confirm_btn = footer.add{ type = "sprite-button", name = "wdp_confirm", style = "wdp_confirm_button", sprite = "utility/confirm_slot", tooltip = "Apply and close" }
   confirm_btn.style.width = 28
   confirm_btn.style.height = 28
 
@@ -2173,17 +2176,18 @@ rebuild_signal_bar = function(frame, panel, player_index)
     return
   end
 
-  -- naked_scroll_pane with a vertical flow (vertical_spacing=0).
-  -- 4 rows × 30px per colour before scrolling.
+  -- deep_slots_scroll_pane with a vertical flow (vertical_spacing=0).
+  -- 2 rows × 30px per colour before scrolling.
   local pane = holder.add{
     type  = "scroll-pane",
     name  = "wdp_signal_pane",
-    style = "naked_scroll_pane",
+    style = "deep_slots_scroll_pane",
     vertical_scroll_policy   = "auto",
     horizontal_scroll_policy = "never",
   }
   pane.style.horizontally_stretchable = true
-  pane.style.maximal_height = 246  -- 4 rows × 30px × 2 colours + spacing
+  pane.style.minimal_height = 160  -- 2 rows × 30px × 2 colours + spacing
+  pane.style.maximal_height = 160  
 
   local inner = pane.add{
     type      = "flow",
@@ -2229,7 +2233,7 @@ tick_update_signal_bar = function(frame, panel, player_index)
     local children = row_elem.children
     if #children ~= count_keys(tbl) then return true end
     for _, child in ipairs(children) do
-      local key = child.name:match("^wdp_sigbar_(.+)$")
+      local key = child.name:match("^wdp_sigbar(.+)$")
       if not key or tbl[key] == nil then return true end
     end
     return false
@@ -2244,12 +2248,12 @@ tick_update_signal_bar = function(frame, panel, player_index)
     return
   end
 
-  -- Same sets -- update counts in-place.
+  -- If same sets then update counts in-place.
   local function update_row(row_elem, tbl)
     if not (row_elem and row_elem.valid) then return end
     for _, child in ipairs(row_elem.children) do
       if child and child.valid then
-        local key = child.name:match("^wdp_sigbar_(.+)$")
+        local key = child.name:match("^wdp_sigbar(.+)$")
         if key then
           local count = tbl[key] or 0
           child.number = count
@@ -2347,6 +2351,7 @@ end
 -- Combinator config serialise / apply
 -- (used by both segment and panel copy/paste)
 ------------------------------------------------------------
+
 local function serialise_combinator_config(ent)
   if not (ent and ent.valid) then return nil end
   local cb = ent.get_or_create_control_behavior()
@@ -2400,8 +2405,7 @@ local function copy_active_segment(player)
   if not seg then return false end
 
   -- Deep-copy the segment including smart state.
-  -- entity_unit_numbers are excluded because they are runtime
-  -- handles; paste will re-create entities as needed.
+  -- entity_unit_numbers are excluded because they are runtime handles; paste will re-create entities as needed. 
   local seg_copy = deep_copy(seg)
   if seg_copy.smart then
     for _, kind in ipairs({ "arithmetic_a", "arithmetic_b", "decider" }) do
@@ -2513,8 +2517,7 @@ end
 -- Panel-wide copy / paste  (Ctrl-C / settings-paste tool)
 ------------------------------------------------------------
 
--- Serialise one smart combinator's behavior config so it can
--- be stored in the clipboard and re-applied on paste.
+-- Serialise one smart combinator's behavior config so it can be stored in the clipboard and re-applied on paste.
 -- Capture the full panel state into the player's panel clipboard.
 local function copy_panel(player, panel)
   ensure_global()
@@ -2576,8 +2579,7 @@ local function copy_panel(player, panel)
 end
 
 -- Paste a panel clipboard onto a destination panel.
--- Segments are mapped 1-to-1; extras on the source are dropped,
--- extras on the destination are left untouched.
+-- Segments are mapped 1-to-1; extras on the source are dropped, extras on the destination are left untouched.
 local function paste_panel(player, src_panel, dst_panel)
   ensure_global()
   if not (dst_panel and dst_panel.valid) then return false end
@@ -2692,9 +2694,21 @@ local function destroy_message_popup(player)
   end
 end
 
+local function destroy_smart_popup(player)
+  local popup = player.gui.screen.wdp_smart_popup
+  if popup and popup.valid then popup.destroy() end
+  -- Untoggle the titlebar button
+  local main = player.gui.screen.wdp_main
+  if main and main.valid and main.wdp_titlebar and main.wdp_titlebar.valid then
+    local btn = main.wdp_titlebar.wdp_smart_toggle
+    if btn and btn.valid then btn.toggled = false end
+  end
+end
+
 local function destroy_main_gui(player)
   destroy_rhs_popup(player)
   destroy_message_popup(player)
+  destroy_smart_popup(player)
 
   local screen = player.gui.screen
   if screen.wdp_main and screen.wdp_main.valid then
@@ -2776,6 +2790,7 @@ local function rebuild_segment_tabs(frame, panel, player_index)
   ------------------------------------------------------------
   -- Top controls root
   ------------------------------------------------------------
+  
   local top = body.add{
     type = "flow",
     name = "wdp_top_controls",
@@ -2787,14 +2802,16 @@ local function rebuild_segment_tabs(frame, panel, player_index)
   top.style.vertical_spacing = 6
 
   ------------------------------------------------------------
-  -- Row 1: segment tabs + copy/paste
+  -- Segment tabs + copy/paste row
   ------------------------------------------------------------
+  
   local tabs_row = top.add{
     type = "flow",
     name = "wdp_tabs_row",
     direction = "horizontal"
   }
   tabs_row.style.horizontally_stretchable = true
+  tabs_row.style.top_margin = 7
   tabs_row.style.vertical_align = "center"
   tabs_row.style.horizontal_spacing = 6
 
@@ -2809,8 +2826,8 @@ local function rebuild_segment_tabs(frame, panel, player_index)
   for i = 1, pdata.segment_count do
     local b = tabs_left.add{
       type = "sprite-button",
-      name = "wdp_tab_" .. i,
-      style = "train_schedule_delete_button",
+      name = "wdp_tab" .. i,
+      style = "frame_action_button",
       sprite = "virtual-signal/signal-" .. i,
       tooltip = "Select segment " .. i
     }
@@ -2850,10 +2867,6 @@ local function rebuild_segment_tabs(frame, panel, player_index)
   paste_btn.style.minimal_width = 92
   paste_btn.style.height = 28
 
-
-  ------------------------------------------------------------
-  -- Row 2: split settings / smart flows
-  ------------------------------------------------------------
   local lower = top.add{
     type = "flow",
     name = "wdp_top_lower",
@@ -2864,8 +2877,9 @@ local function rebuild_segment_tabs(frame, panel, player_index)
   lower.style.vertical_align = "top"
 
   ------------------------------------------------------------
-  -- Left: settings flow
+  -- Settings flow
   ------------------------------------------------------------
+  
   local settings_frame = lower.add{
     type = "flow",
     name = "wdp_settings_frame",
@@ -2913,164 +2927,195 @@ local function rebuild_segment_tabs(frame, panel, player_index)
     caption = "Show this tag in chart",
     state = seg.show_in_chart == true
   }
+end
 
-  ------------------------------------------------------------
-  -- Right: smart flow
-  ------------------------------------------------------------
-  local smart_frame = lower.add{
-    type = "flow",
-    name = "wdp_smart_frame",
-    direction = "vertical"
+------------------------------------------------------------
+-- Smart logic pop-out window
+------------------------------------------------------------
+
+local function build_smart_popup(player, panel, seg, seg_idx)
+  destroy_smart_popup(player)
+
+  local popup = player.gui.screen.add{
+    type = "frame",
+    name = "wdp_smart_popup",
+    direction = "vertical",
   }
-  smart_frame.style.horizontally_stretchable = true
-  smart_frame.style.minimal_width = 0
-  smart_frame.style.minimal_height = 60
-  smart_frame.style.left_margin = 8
-  smart_frame.style.right_margin = 8
-  smart_frame.style.top_margin = 8
-  smart_frame.style.bottom_margin = 8
-  smart_frame.style.vertical_spacing = 0
-  smart_frame.style.vertical_align = "center"
+  popup.auto_center = false
+  popup.style.width = 196
 
-  ------------------------------------------------------------
-  -- Smart row 1: label + checkbox, right aligned
-  ------------------------------------------------------------
-  local smart_enable_row = smart_frame.add{
-    type = "flow",
-    name = "wdp_smart_enable_row",
-    direction = "horizontal"
+  -- Position just to the right of the main frame
+  local main = player.gui.screen.wdp_main
+  if main and main.valid then
+    popup.location = {
+      x = main.location.x + 422,
+      y = main.location.y
+    }
+  end
+  
+------------------------------------------------------------
+  -- Titlebar
+------------------------------------------------------------
+  
+  local titlebar = popup.add{ type = "flow", name = "wdp_smart_popup_titlebar", direction = "horizontal" }
+  titlebar.drag_target = popup
+  local title = titlebar.add{ type = "label", caption = "Smartscreen logic", style = "frame_title" }
+  title.drag_target = popup
+  local drag = titlebar.add{ type = "empty-widget", style = "draggable_space_header" }
+  drag.style.horizontally_stretchable = true
+  drag.style.height = 24
+  drag.drag_target = popup
+  drag.ignored_by_interaction = true
+  
+  popup.add{ type = "line" }
+
+  local body = popup.add{
+    type = "frame",
+    name = "wdp_smart_popup_body",
+    direction = "vertical",
+    style = "inside_shallow_frame"
   }
-  smart_enable_row.style.horizontally_stretchable = true
-  smart_enable_row.style.vertical_align = "center"
-  smart_enable_row.style.horizontal_spacing = 6
-  smart_enable_row.style.height = 22
+  body.style.top_padding = 10
+  body.style.bottom_padding = 10
+  body.style.left_padding = 10
+  body.style.right_padding = 10
 
-  local enable_spacer = smart_enable_row.add{ type = "empty-widget" }
-  enable_spacer.style.horizontally_stretchable = true
-
-  smart_enable_row.add{
-    type = "label",
-    name = "wdp_enable_smart_logic_label",
-    caption = "Enable smart logic "
-  }
-
-    local smart_toggle = smart_enable_row.add{
-  type = "checkbox",
-  name = "wdp_enable_smart_logic_placeholder",
-  caption = "",
-  state = seg.smart and seg.smart.enabled == true
-}
-
-  ------------------------------------------------------------
-  -- Smart row 2: arithmetic / decider controls, right aligned
-  ------------------------------------------------------------
-  local smart_modes_row = smart_frame.add{
-    type = "flow",
-    name = "wdp_smart_modes_row",
-    direction = "horizontal"
-  }
-  smart_modes_row.style.horizontally_stretchable = true
-  smart_modes_row.style.vertical_align = "center"
-  smart_modes_row.style.horizontal_spacing = 6
-  smart_modes_row.style.top_margin = 4
-  smart_modes_row.style.height = 28
-
-  local smart_spacer = smart_modes_row.add{ type = "empty-widget" }
-  smart_spacer.style.horizontally_stretchable = true
-
-  local smart_enabled = seg.smart and seg.smart.enabled == true
+  local smart_enabled  = seg.smart and seg.smart.enabled == true
   local arith_b_enabled = smart_enabled and seg.smart.arithmetic_b and seg.smart.arithmetic_b.enabled == true
   local arith_a_enabled = arith_b_enabled and seg.smart.arithmetic_a and seg.smart.arithmetic_a.enabled == true
 
-  -- arithmetic_a button + checkbox
-  local arith_a_group = smart_modes_row.add{
-    type = "flow", name = "wdp_smart_arithmetic_a_group", direction = "horizontal"
-  }
-  arith_a_group.style.vertical_align = "center"
-  arith_a_group.style.horizontal_spacing = 7
+  local function make_row(name)
+    local row = body.add{ type = "flow", name = name, direction = "horizontal" }
+    row.style.vertical_align = "center"
+    row.style.horizontal_spacing = 8
+    row.style.top_margin = 4
+    return row
+  end
+  
+------------------------------------------------------------
+  -- [enable/disable]
+------------------------------------------------------------
 
-  local arith_a_btn = arith_a_group.add{
-    type = "sprite-button",
-    name = "wdp_smart_arithmetic_a_placeholder",
-    style = "train_schedule_item_select_button",
-    sprite = "item/arithmetic-combinator",
-    tooltip = "Configure upstream arithmetic logic (A)"
-  }
-  arith_a_btn.style.width = 28
-  arith_a_btn.style.height = 28
-  arith_a_btn.enabled = arith_a_enabled
-
-  local arith_a_check = arith_a_group.add{
+  local enable_row = make_row("wdp_smart_enable_row")
+  enable_row.add{
     type = "checkbox",
-    name = "wdp_smart_arithmetic_a_check_placeholder",
-    caption = "",
-    state = arith_a_enabled
+    name = "wdp_enable_smart_logic",
+    caption = "Enable/disable",
+    state = smart_enabled
   }
-  arith_a_check.enabled = arith_b_enabled
+  local sep = body.add{ type = "line", direction = "horizontal" }
+  sep.style.top_margin = 6
+  sep.style.bottom_margin = 2
 
-  -- arrow between arithmetic_a and arithmetic_b
-  local arrow_lbl = smart_modes_row.add{ type = "label", caption = "→" }
-  arrow_lbl.style.horizontal_align = "center"
-  arrow_lbl.style.vertical_align = "center"
-  arrow_lbl.style.left_margin = 2
-  arrow_lbl.style.right_margin = 2
-
-  -- arithmetic_b button + checkbox
-  local arith_b_group = smart_modes_row.add{
-    type = "flow", name = "wdp_smart_arithmetic_b_group", direction = "horizontal"
-  }
-  arith_b_group.style.vertical_align = "center"
-  arith_b_group.style.horizontal_spacing = 7
-
-  local arith_b_btn = arith_b_group.add{
-    type = "sprite-button",
-    name = "wdp_smart_arithmetic_b_placeholder",
-    style = "train_schedule_item_select_button",
-    sprite = "item/arithmetic-combinator",
-    tooltip = "Configure arithmetic logic (B)"
-  }
-  arith_b_btn.style.width = 28
-  arith_b_btn.style.height = 28
-  arith_b_btn.enabled = arith_b_enabled
-
-  local arith_b_check = arith_b_group.add{
-    type = "checkbox",
-    name = "wdp_smart_arithmetic_b_check_placeholder",
-    caption = "",
-    state = arith_b_enabled
-  }
-  arith_b_check.enabled = smart_enabled
-
-  local between_spacer = smart_modes_row.add{ type = "empty-widget" }
-  between_spacer.style.width = 16
-
-  local decider_group = smart_modes_row.add{
-    type = "flow", name = "wdp_smart_decider_group", direction = "horizontal"
-  }
-  decider_group.style.vertical_align = "center"
-  decider_group.style.horizontal_spacing = 7
-
-  local decider_btn = decider_group.add{
-    type = "sprite-button",
-    name = "wdp_smart_decider_placeholder",
-    style = "train_schedule_item_select_button",
-    sprite = "item/decider-combinator",
-    tooltip = "Configure decider logic"
-  }
-  decider_btn.style.width = 28
-  decider_btn.style.height = 28
-  decider_btn.enabled = smart_enabled
-    and seg.smart.decider
-    and seg.smart.decider.enabled == true
-
-  local decider_check = decider_group.add{
-    type = "checkbox",
-    name = "wdp_smart_decider_check_placeholder",
-    caption = "",
+------------------------------------------------------------
+  -- [decider]
+------------------------------------------------------------
+  
+  local decider_row = make_row("wdp_smart_decider_group")
+  local decider_check = decider_row.add{
+    type = "checkbox", name = "wdp_smart_decider_check", caption = "",
     state = seg.smart and seg.smart.decider and seg.smart.decider.enabled == true
   }
   decider_check.enabled = smart_enabled
+  local decider_btn = decider_row.add{
+    type = "sprite-button", name = "wdp_smart_decider",
+	style = "slot_button_in_shallow_frame", sprite = "item/decider-combinator",
+    }
+  decider_btn.style.width = 40
+  decider_btn.style.height = 40
+  decider_btn.enabled = smart_enabled and seg.smart.decider and seg.smart.decider.enabled == true
+  
+  local label = decider_row.add{
+    type = "label",
+    caption = "Decider logic",
+	}
+	
+------------------------------------------------------------
+  -- [arithmetic b]
+------------------------------------------------------------
+  
+  local arith_b_row = make_row("wdp_smart_arithmetic_b_group")
+  arith_b_row.style.top_margin = 8
+  local arith_b_check = arith_b_row.add{
+    type = "checkbox", name = "wdp_smart_arithmetic_b_check", caption = "",
+    state = arith_b_enabled
+  }
+  arith_b_check.enabled = smart_enabled
+  local arith_b_btn = arith_b_row.add{
+    type = "sprite-button", name = "wdp_smart_arithmetic_b",
+    style = "slot_button_in_shallow_frame", sprite = "item/arithmetic-combinator",
+    }
+  arith_b_btn.style.width = 40
+  arith_b_btn.style.height = 40
+  arith_b_btn.enabled = arith_b_enabled
+  
+  local label = arith_b_row.add{
+    type = "label",
+    caption = "Arithmetic logic",
+	}
+	
+------------------------------------------------------------
+  -- [up arrow]
+------------------------------------------------------------
+  
+  local arrow_row = body.add{ type = "flow", direction = "horizontal" }
+  arrow_row.style.horizontally_stretchable = true
+  arrow_row.style.horizontal_align = "left"
+  arrow_row.style.top_margin = 4
+  arrow_row.style.bottom_margin = 2
+  arrow_row.style.left_margin = 35
+  arrow_row.add{ type = "label", caption = "↑" }
+  
+------------------------------------------------------------
+  -- [arithmetic a]
+------------------------------------------------------------
+
+  local arith_a_row = make_row("wdp_smart_arithmetic_a_group")
+  local arith_a_check = arith_a_row.add{
+    type = "checkbox", name = "wdp_smart_arithmetic_a_check", caption = "",
+    state = arith_a_enabled
+  }
+  arith_a_check.enabled = arith_b_enabled
+  local arith_a_btn = arith_a_row.add{
+    type = "sprite-button", name = "wdp_smart_arithmetic_a",
+    style = "slot_button_in_shallow_frame", sprite = "item/arithmetic-combinator",
+  }
+  arith_a_btn.style.width = 40
+  arith_a_btn.style.height = 40
+  arith_a_btn.enabled = arith_a_enabled
+  
+    local label = arith_a_row.add{
+    type = "label",
+    caption = "Arithmetic logic",
+	}
 end
+
+local function refresh_smart_popup(player, panel, seg, seg_idx)
+  local popup = player.gui.screen.wdp_smart_popup
+  if not (popup and popup.valid) then return end
+  local loc = popup.location
+  build_smart_popup(player, panel, seg, seg_idx)
+  -- Restore position after rebuild
+  local new_popup = player.gui.screen.wdp_smart_popup
+  if new_popup and new_popup.valid and loc then
+    new_popup.location = loc
+  end
+  -- Re-assert toggle button: build_smart_popup calls destroy_smart_popup which explicitly sets toggled = false: corrected it here.
+  local main = player.gui.screen.wdp_main
+  if main and main.valid and main.wdp_titlebar and main.wdp_titlebar.valid then
+    local btn = main.wdp_titlebar.wdp_smart_toggle
+    if btn and btn.valid then btn.toggled = true end
+  end
+end
+
+local function smart_popup_is_open(player)
+  local popup = player.gui.screen.wdp_smart_popup
+  return popup and popup.valid
+end
+
+  ------------------------------------------------------------
+  -- Rule rows
+  ------------------------------------------------------------
 
 local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl, rule_count)
   local row = parent.add{
@@ -3085,11 +3130,12 @@ local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl
   row.style.bottom_padding = 3
   row.style.left_padding = 6
   row.style.right_padding = 6
-  row.style.bottom_margin = 1
+  row.style.bottom_margin = 4
 
   ------------------------------------------------------------
-  -- [icon signal]
+  -- [display icon]
   ------------------------------------------------------------
+  
   local icon_pick = row.add{
     type = "choose-elem-button",
     name = "wdp_icon_signal",
@@ -3107,6 +3153,7 @@ local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl
   ------------------------------------------------------------
   -- [message preview]
   ------------------------------------------------------------
+  
   local preview = row.add{
     type = "label",
     name = "wdp_message_preview",
@@ -3120,29 +3167,30 @@ local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl
   ------------------------------------------------------------
   -- [edit message button]
   ------------------------------------------------------------
+  
   local edit_btn = row.add{
     type = "sprite-button",
-    name = "wdp_msg_edit_" .. rule_idx,
-    sprite = "wdp_gui_edit",
-    hovered_sprite = "wdp_gui_edit_hover",
-    clicked_sprite = "wdp_gui_edit_onclick",
-    tooltip = "Edit message",
+    style = "mini_button_aligned_to_text_vertically_when_centered",
+    name = "wdp_gui_edit" .. rule_idx,
+    sprite = "utility/rename_icon",
     tags = { rule_index = rule_idx, segment_index = seg_idx }
   }
-  edit_btn.style.width = 24
-  edit_btn.style.height = 24
+  edit_btn.style.width = 17
+  edit_btn.style.height = 17
   edit_btn.style.left_margin = -3
 
   ------------------------------------------------------------
   -- [space]
   ------------------------------------------------------------
+  
   local gap1 = row.add{ type = "empty-widget" }
-  gap1.style.width = 64
+  gap1.style.width = 78
   gap1.style.height = 1
 
   ------------------------------------------------------------
   -- [first signal button]
   ------------------------------------------------------------
+  
   local first_sig_count = rule.first_signal
     and format_si_compact(signal_value_from_table(merged_tbl, rule.first_signal))
     or nil
@@ -3153,7 +3201,7 @@ local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl
   local first_pick = row.add{
     type = "choose-elem-button",
     name = "wdp_first_signal",
-	style = "train_schedule_item_select_button",
+    style = "train_schedule_item_select_button",
     elem_type = "signal",
     signal = clone_signal(rule.first_signal),
     tooltip = first_tooltip,
@@ -3168,6 +3216,7 @@ local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl
   ------------------------------------------------------------
   -- [comparator dropdown]
   ------------------------------------------------------------
+  
   local dd = row.add{
     type = "drop-down",
     name = "wdp_comparator",
@@ -3181,6 +3230,7 @@ local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl
   ------------------------------------------------------------
   -- [rhs button]
   ------------------------------------------------------------
+  
   if rule.rhs and rule.rhs.kind == "signal" and rule.rhs.signal then
     local rhs_sig_count = format_si_compact(signal_value_from_table(merged_tbl, rule.rhs.signal))
     local rhs_btn = row.add{
@@ -3191,20 +3241,19 @@ local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl
       tooltip = "Current value: " .. rhs_sig_count .. "\nClick to change",
       tags = { rule_index = rule_idx, segment_index = seg_idx }
     }
-    rhs_btn.style.width = 28
-    rhs_btn.style.height = 28
+    rhs_btn.style.width = 34
+    rhs_btn.style.height = 34
     rhs_btn.style.minimal_width = 28
     rhs_btn.style.minimal_height = 28
     rhs_btn.style.maximal_width = 28
     rhs_btn.style.maximal_height = 28
   else
-    
-	local rhs_btn = row.add{
+    local rhs_btn = row.add{
       type = "button",
       name = "wdp_rhs_open_" .. rule_idx,
       style = "train_schedule_item_select_button",
       caption = format_si_compact(rule.rhs and rule.rhs.constant),
-      tooltip = "Constant: " .. tostring(rule.rhs and rule.rhs.constant or 0) .. "\nClick to change",
+      tooltip = "Constant value: " .. tostring(rule.rhs and rule.rhs.constant or 0) .. "\nClick to change",
       tags = { rule_index = rule_idx, segment_index = seg_idx }
     }
     rhs_btn.style.width = 28
@@ -3221,17 +3270,19 @@ local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl
   ------------------------------------------------------------
   -- [space]
   ------------------------------------------------------------
+  
   local gap2 = row.add{ type = "empty-widget" }
-  gap2.style.width = 64
+  gap2.style.width = 63
   gap2.style.height = 1
 
   ------------------------------------------------------------
   -- [up][down][delete]
   ------------------------------------------------------------
+  
   local up = row.add{
     type = "sprite-button",
     name = "wdp_rule_up_" .. rule_idx,
-    style = "train_schedule_delete_button",
+    style = "frame_action_button",
     sprite = "wdp_gui_arrow_up",
     tooltip = "Move message up",
     tags = { rule_index = rule_idx, segment_index = seg_idx }
@@ -3243,7 +3294,7 @@ local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl
   local down = row.add{
     type = "sprite-button",
     name = "wdp_rule_down_" .. rule_idx,
-    style = "train_schedule_delete_button",
+    style = "frame_action_button",
     sprite = "wdp_gui_arrow_down",
     tooltip = "Move message down",
     tags = { rule_index = rule_idx, segment_index = seg_idx }
@@ -3255,7 +3306,7 @@ local function build_rule_row(parent, panel, seg_idx, rule_idx, rule, merged_tbl
   local del = row.add{
     type = "sprite-button",
     name = "wdp_rule_delete_" .. rule_idx,
-    style = "train_schedule_delete_button",
+    style = "frame_action_button",
     sprite = "wdp_gui_remove",
     tooltip = "Delete message",
     tags = { rule_index = rule_idx, segment_index = seg_idx }
@@ -3275,8 +3326,7 @@ rebuild_editor = function(frame, panel, player_index, merged_tbl)
   local seg, seg_idx = get_active_segment_config(panel, player_index)
   if not seg then return end
 
-  -- Use the smart-effective signal table for the active segment so
-  -- tooltips show combinator output values, not raw panel input.
+  -- Use the smart-effective signal table for the active segment so signal bar/tooltips show combinator output values, not raw panel input.
   local effective_tbl = merged_tbl
   if seg and seg.smart and seg.smart.enabled then
     effective_tbl = select(1, compute_smart_output_for_segment(panel, seg))
@@ -3400,7 +3450,6 @@ apply_gui_to_segment = function(player)
       local idx = tonumber(child.tags and child.tags.rule_index)
       if idx and seg.rules[idx] then
         local rule = seg.rules[idx]
-
         -- Rule controls now live directly on the row frame.
         local row = child
 
@@ -3450,8 +3499,10 @@ refresh_main_gui = function(player)
     frame.wdp_titlebar.wdp_title.caption = spec and spec.title or "Widescreen Display Panel"
   end
 
-  if frame.wdp_connected_holder and frame.wdp_connected_holder.valid then
-    rebuild_connected_row(frame.wdp_connected_holder, panel)
+  if frame.wdp_body and frame.wdp_body.valid
+      and frame.wdp_body.wdp_connected_holder
+      and frame.wdp_body.wdp_connected_holder.valid then
+    rebuild_connected_row(frame.wdp_body.wdp_connected_holder, panel)
   end
 
   if frame.wdp_body and frame.wdp_body.valid then
@@ -3462,6 +3513,14 @@ refresh_main_gui = function(player)
 
   rebuild_editor(frame, panel, player.index, merged_tbl)
   rebuild_signal_bar(frame, panel, player.index)
+
+  -- Re-assert smart toggle pressed state if popup is open.
+  if frame.wdp_titlebar and frame.wdp_titlebar.valid then
+    local btn = frame.wdp_titlebar.wdp_smart_toggle
+    if btn and btn.valid then
+      btn.toggled = smart_popup_is_open(player) == true
+    end
+  end
 end
 
 refresh_live_panel_preview = function(player, skip_gui_refresh)
@@ -3515,14 +3574,11 @@ local function refresh_rhs_popup(player)
 
   local sig_ok = sig_row.add{
     type = "sprite-button",
+    style = "wdp_confirm_button",
     name = "wdp_rhs_signal_apply",
-    sprite = "wdp_gui_confirm",
-    hovered_sprite = "wdp_gui_confirm_hover",
-    clicked_sprite = "wdp_gui_confirm_onclick",
-    disabled_sprite = "wdp_gui_confirm_disabled",
+    sprite = "utility/confirm_slot",
     tooltip = "Use signal"
   }
-  sig_ok.enabled = sig_pick.elem_value ~= nil
   sig_ok.style.width = 28
   sig_ok.style.height = 28
 
@@ -3545,14 +3601,11 @@ local function refresh_rhs_popup(player)
 
   local const_ok = const_row.add{
     type = "sprite-button",
+    style = "wdp_confirm_button",
     name = "wdp_rhs_constant_apply",
-    sprite = "wdp_gui_confirm",
-    hovered_sprite = "wdp_gui_confirm_hover",
-    clicked_sprite = "wdp_gui_confirm_onclick",
-    disabled_sprite = "wdp_gui_confirm_disabled",
+    sprite = "utility/confirm_slot",
     tooltip = "Use constant"
   }
-  const_ok.enabled = safe_number_text(tf.text) ~= nil
   const_ok.style.width = 28
   const_ok.style.height = 28
 end
@@ -3602,7 +3655,7 @@ local function open_rhs_popup(player, seg_idx, rule_idx)
     sprite = "utility/close",
     hovered_sprite = "utility/close_black",
     clicked_sprite = "utility/close_black",
-    tooltip = "Close"
+    tooltip = "Close (E or Escape)"
   }
 
   local body = popup.add{
@@ -3643,6 +3696,7 @@ local function refresh_rhs_popup(player)
   ------------------------------------------------------------
   -- Signal row
   ------------------------------------------------------------
+  
   local sig_row = content.add{
     type = "flow",
     name = "wdp_rhs_signal_row",
@@ -3668,14 +3722,11 @@ local function refresh_rhs_popup(player)
 
   local sig_ok = sig_row.add{
     type = "sprite-button",
+    style = "wdp_confirm_button",
     name = "wdp_rhs_signal_apply",
-    sprite = "wdp_gui_confirm",
-    hovered_sprite = "wdp_gui_confirm_hover",
-    clicked_sprite = "wdp_gui_confirm_onclick",
-    disabled_sprite = "wdp_gui_confirm_disabled",
+    sprite = "utility/confirm_slot",
     tooltip = "Use signal"
   }
-  sig_ok.enabled = sig_pick.elem_value ~= nil
   sig_ok.style.width = 28
   sig_ok.style.height = 28
 
@@ -3693,6 +3744,7 @@ local function refresh_rhs_popup(player)
   ------------------------------------------------------------
   -- Constant row
   ------------------------------------------------------------
+  
   local const_row = content.add{
     type = "flow",
     name = "wdp_rhs_constant_row",
@@ -3716,14 +3768,11 @@ local function refresh_rhs_popup(player)
 
   local const_ok = const_row.add{
     type = "sprite-button",
+    style = "wdp_confirm_button",
     name = "wdp_rhs_constant_apply",
-    sprite = "wdp_gui_confirm",
-    hovered_sprite = "wdp_gui_confirm_hover",
-    clicked_sprite = "wdp_gui_confirm_onclick",
-    disabled_sprite = "wdp_gui_confirm_disabled",
+    sprite = "utility/confirm_slot",
     tooltip = "Use constant"
   }
-  const_ok.enabled = safe_number_text(tf.text) ~= nil
   const_ok.style.width = 28
   const_ok.style.height = 28
 end
@@ -3776,7 +3825,7 @@ local function open_msg_icon_popup(player)
     sprite = "utility/close",
     hovered_sprite = "utility/close_black",
     clicked_sprite = "utility/close_black",
-    tooltip = "Close"
+    tooltip = "Close (E or Escape)"
   }
 
   local body = popup.add{
@@ -3858,7 +3907,7 @@ local function open_message_popup(player, seg_idx, rule_idx)
     sprite = "utility/close",
     hovered_sprite = "utility/close_black",
     clicked_sprite = "utility/close_black",
-    tooltip = "Close"
+    tooltip = "Close (E or Escape)"
   }
 
   local body = popup.add{
@@ -3883,14 +3932,15 @@ local function open_message_popup(player, seg_idx, rule_idx)
 
   local open_btn = icon_row.add{
     type = "sprite-button",
+    style = "choose_chat_icon_in_textbox_button",
     name = "wdp_msg_icon_open",
     sprite = "wdp_gui_insert",
     hovered_sprite = "wdp_gui_insert_hover",
-    tooltip = "Insert icon into message"
+    tooltip = "Insert icon"
   }
-  open_btn.style.width = 28
-  open_btn.style.height = 28
-
+  open_btn.style.width = 26
+  open_btn.style.height = 26
+  
   local text = body.add{
     type = "text-box",
     name = "wdp_msg_text",
@@ -3910,11 +3960,9 @@ local function open_message_popup(player, seg_idx, rule_idx)
 
   local ok_btn = footer.add{
     type = "sprite-button",
+    style = "wdp_confirm_button",
     name = "wdp_msg_apply",
-    sprite = "wdp_gui_confirm",
-    hovered_sprite = "wdp_gui_confirm_hover",
-    clicked_sprite = "wdp_gui_confirm_onclick",
-    disabled_sprite = "wdp_gui_confirm_disabled",
+    sprite = "utility/confirm_slot",
     tooltip = "Apply message"
   }
   ok_btn.style.width = 28
@@ -3950,7 +3998,7 @@ local function open_panel_gui(player, panel)
   local spec = PANEL_SPECS[panel.name]
   local frame = player.gui.screen.add{ type = "frame", name = "wdp_main", direction = "vertical" }
   frame.auto_center = true
-  frame.style.width = 560
+  frame.style.width = 563
 
     local titlebar = frame.add{ type = "flow", name = "wdp_titlebar", direction = "horizontal" }
   titlebar.drag_target = frame
@@ -3974,6 +4022,17 @@ local function open_panel_gui(player, panel)
   drag.drag_target = frame
   drag.ignored_by_interaction = true
 
+  local smart_btn = titlebar.add{
+    type = "sprite-button",
+    name = "wdp_smart_toggle",
+    style = "frame_action_button",
+    sprite = "wdp_circuit_connection",
+    hovered_sprite = "wdp_circuit_connection",
+    clicked_sprite = "wdp_circuit_connection",
+    tooltip = "Smartscreen logic"
+  }
+  smart_btn.style.size = 24
+
   local close_btn = titlebar.add{
     type = "sprite-button",
     name = "wdp_close",
@@ -3981,12 +4040,24 @@ local function open_panel_gui(player, panel)
     sprite = "utility/close",
     hovered_sprite = "utility/close_black",
     clicked_sprite = "utility/close_black",
-    tooltip = "Close"
+    tooltip = "Close (E or Escape)"
   }
 
   frame.add{ type = "line" }
 
-  local connected_holder = frame.add{
+  local body = frame.add{
+    type = "frame",
+    name = "wdp_body",
+    direction = "vertical",
+    style = "inside_shallow_frame"
+  }
+  body.style.horizontally_stretchable = true
+  body.style.top_padding = 0
+  body.style.bottom_padding = 8
+  body.style.left_padding = 10
+  body.style.right_padding = 10
+
+  local connected_holder = body.add{
     type = "frame",
     name = "wdp_connected_holder",
     direction = "vertical",
@@ -3999,17 +4070,8 @@ local function open_panel_gui(player, panel)
   connected_holder.style.right_padding = 6
   connected_holder.style.top_margin = 0
   connected_holder.style.bottom_margin = 0
-
-  local body = frame.add{
-    type = "frame",
-    name = "wdp_body",
-    direction = "vertical",
-    style = "inside_shallow_frame"
-  }
-  body.style.top_padding = 8
-  body.style.bottom_padding = 8
-  body.style.left_padding = 10
-  body.style.right_padding = 10
+  connected_holder.style.left_margin = -10
+  connected_holder.style.right_margin = -10
 
   refresh_main_gui(player)
 
@@ -4037,6 +4099,20 @@ script.on_event(defines.events.on_gui_opened, function(event)
   if is_panel(ent) then
     open_panel_gui(player, ent)
   end
+end)
+
+script.on_event(defines.events.on_gui_location_changed, function(event)
+  if not (event.element and event.element.valid) then return end
+  if event.element.name ~= "wdp_main" then return end
+  local player = game.get_player(event.player_index)
+  if not (player and player.valid) then return end
+  local popup = player.gui.screen.wdp_smart_popup
+  if not (popup and popup.valid) then return end
+  local main = event.element
+  popup.location = {
+    x = main.location.x + 422,
+    y = main.location.y
+  }
 end)
 
 script.on_event(defines.events.on_gui_click, function(event)
@@ -4102,7 +4178,32 @@ script.on_event(defines.events.on_gui_click, function(event)
 
   if name == "wdp_close" then
     apply_gui_to_segment(player)
+    destroy_smart_popup(player)
     destroy_main_gui(player)
+    return
+  end
+
+  if name == "wdp_smart_toggle" then
+    if smart_popup_is_open(player) then
+      destroy_smart_popup(player)
+    else
+      local state = get_gui_state(player.index)
+      local panel = get_panel_from_gui_state(state)
+      if panel and panel.valid then
+        local pdata = ensure_panel_segment_data(panel)
+        local seg_idx = state and state.active_tab or 1
+        local seg = pdata and pdata.segments and pdata.segments[seg_idx]
+        if seg then
+          build_smart_popup(player, panel, seg, seg_idx)
+          -- Keep button in pressed state while popup is open
+          local frame = player.gui.screen.wdp_main
+          if frame and frame.valid and frame.wdp_titlebar and frame.wdp_titlebar.valid then
+            local btn = frame.wdp_titlebar.wdp_smart_toggle
+            if btn and btn.valid then btn.toggled = true end
+          end
+        end
+      end
+    end
     return
   end
 
@@ -4112,9 +4213,9 @@ script.on_event(defines.events.on_gui_click, function(event)
     return
   end
   
-    if name == "wdp_smart_arithmetic_a_placeholder"
-      or name == "wdp_smart_arithmetic_b_placeholder"
-      or name == "wdp_smart_decider_placeholder" then
+    if name == "wdp_smart_arithmetic_a"
+      or name == "wdp_smart_arithmetic_b"
+      or name == "wdp_smart_decider" then
     local state = get_gui_state(player.index)
     if not state then return end
 
@@ -4129,8 +4230,8 @@ script.on_event(defines.events.on_gui_click, function(event)
     if not seg then return end
 
     local kind
-    if name == "wdp_smart_arithmetic_a_placeholder" then kind = "arithmetic_a"
-    elseif name == "wdp_smart_arithmetic_b_placeholder" then kind = "arithmetic_b"
+    if name == "wdp_smart_arithmetic_a" then kind = "arithmetic_a"
+    elseif name == "wdp_smart_arithmetic_b" then kind = "arithmetic_b"
     else kind = "decider" end
 
     local ref = get_segment_smart_ref(seg, kind)
@@ -4197,7 +4298,7 @@ script.on_event(defines.events.on_gui_click, function(event)
     return
   end
 
-  local tab_idx = name:match("^wdp_tab_(%d+)$")
+  local tab_idx = name:match("^wdp_tab(%d+)$")
   if tab_idx then
     local state = get_gui_state(player.index)
     if not state then return end
@@ -4207,6 +4308,16 @@ script.on_event(defines.events.on_gui_click, function(event)
     destroy_rhs_popup(player)
     destroy_message_popup(player)
     refresh_main_gui(player)
+    -- Refresh smart popup for the new segment if open
+    if smart_popup_is_open(player) then
+      local panel = get_panel_from_gui_state(state)
+      if panel and panel.valid then
+        local pdata = ensure_panel_segment_data(panel)
+        local seg_idx = state.active_tab
+        local seg = pdata and pdata.segments and pdata.segments[seg_idx]
+        if seg then refresh_smart_popup(player, panel, seg, seg_idx) end
+      end
+    end
     return
   end
 
@@ -4220,7 +4331,7 @@ script.on_event(defines.events.on_gui_click, function(event)
     return
   end
 
-  local msg_idx = name:match("^wdp_msg_edit_(%d+)$")
+  local msg_idx = name:match("^wdp_gui_edit(%d+)$")
   if msg_idx then
     local state = get_gui_state(player.index)
     local panel = get_panel_from_gui_state(state)
@@ -4378,10 +4489,10 @@ script.on_event(defines.events.on_gui_checked_state_changed, function(event)
     return
   end
 
-  if name ~= "wdp_enable_smart_logic_placeholder"
-    and name ~= "wdp_smart_arithmetic_a_check_placeholder"
-    and name ~= "wdp_smart_arithmetic_b_check_placeholder"
-    and name ~= "wdp_smart_decider_check_placeholder"
+  if name ~= "wdp_enable_smart_logic"
+    and name ~= "wdp_smart_arithmetic_a_check"
+    and name ~= "wdp_smart_arithmetic_b_check"
+    and name ~= "wdp_smart_decider_check"
   then
     return
   end
@@ -4399,7 +4510,7 @@ script.on_event(defines.events.on_gui_checked_state_changed, function(event)
   local seg = pdata.segments[seg_idx]
   if not seg then return end
 
-  if name == "wdp_enable_smart_logic_placeholder" then
+  if name == "wdp_enable_smart_logic" then
     seg.smart.enabled = (el.state == true)
 
     if not seg.smart.enabled then
@@ -4413,15 +4524,19 @@ script.on_event(defines.events.on_gui_checked_state_changed, function(event)
 
     persist_panel_config(panel)
     refresh_main_gui(player)
+    -- Refresh popup if open
+    if smart_popup_is_open(player) then
+      refresh_smart_popup(player, panel, seg, seg_idx)
+    end
     return
   end
 
-  if name == "wdp_smart_arithmetic_a_check_placeholder"
-      or name == "wdp_smart_arithmetic_b_check_placeholder"
-      or name == "wdp_smart_decider_check_placeholder" then
+  if name == "wdp_smart_arithmetic_a_check"
+      or name == "wdp_smart_arithmetic_b_check"
+      or name == "wdp_smart_decider_check" then
     local kind
-    if name == "wdp_smart_arithmetic_a_check_placeholder" then kind = "arithmetic_a"
-    elseif name == "wdp_smart_arithmetic_b_check_placeholder" then kind = "arithmetic_b"
+    if name == "wdp_smart_arithmetic_a_check" then kind = "arithmetic_a"
+    elseif name == "wdp_smart_arithmetic_b_check" then kind = "arithmetic_b"
     else kind = "decider" end
 
     local enabled = (el.state == true)
@@ -4432,8 +4547,7 @@ script.on_event(defines.events.on_gui_checked_state_changed, function(event)
 
     seg.smart[kind].enabled = enabled
 
-    -- When arithmetic_b is unchecked, also disable arithmetic_a
-    -- since it has no path to the segment without arithmetic_b.
+    -- When arithmetic_b is unchecked, also disable arithmetic_a since it has no path to the segment without arithmetic_b. 
     if kind == "arithmetic_b" and not enabled then
       seg.smart.arithmetic_a.enabled = false
       local ref_a = get_segment_smart_ref(seg, "arithmetic_a")
@@ -4457,6 +4571,9 @@ script.on_event(defines.events.on_gui_checked_state_changed, function(event)
 
     persist_panel_config(panel)
     refresh_main_gui(player)
+    if smart_popup_is_open(player) then
+      refresh_smart_popup(player, panel, seg, seg_idx)
+    end
     return
   end
 end)
@@ -4492,6 +4609,11 @@ script.on_event(defines.events.on_gui_closed, function(event)
       return
     end
 
+    if event.element.name == "wdp_smart_popup" then
+      destroy_smart_popup(player)
+      return
+    end
+
     if event.element.name == "wdp_msg_icon_popup" then
       destroy_msg_icon_popup(player)
       return
@@ -4503,9 +4625,7 @@ script.on_event(defines.events.on_gui_closed, function(event)
     end
 
     if event.element.name == "wdp_main" then
-      -- If we're in the middle of opening a smart combinator,
-      -- the main GUI close was triggered by Factorio swapping
-      -- player.opened -- don't destroy it.
+      -- If in the middle of opening a smart combinator, main GUI close is triggered by Factorio swapping player.opened, don't destroy it.
       if state and state.opening_smart_combinator then
         return
       end
@@ -4527,6 +4647,7 @@ end)
 ------------------------------------------------------------
 -- Scan / build / remove / rotation stop
 ------------------------------------------------------------
+
 local function panel_names_list()
   local names = {}
 
@@ -4567,12 +4688,27 @@ local function on_built(event)
   end
 end
 
+local function on_pre_removed(event)
+  local ent = event.entity
+  if not is_panel(ent) then return end
+
+  local unit_number = ent.unit_number
+
+  -- Destroy port before mining completes (entity.destroy() called from on_player_mined_entity can silently fail in Factorio 2.0).
+  local ports = global.wdp.ports and global.wdp.ports[unit_number]
+  if ports and ports.output and ports.output.valid then
+    ports.output.destroy()
+  end
+
+  if ent.valid then
+    destroy_ports_for_removed_panel(ent)
+  end
+end
+
 local function on_removed(event)
   local ent = event.entity
-  if is_panel(ent) then
-    destroy_ports_for_removed_panel(ent)
-    detach_ports(ent)
-  end
+  if not is_panel(ent) then return end
+  detach_ports_by_unit(ent.unit_number)
 end
 
 script.on_init(function()
@@ -4584,15 +4720,20 @@ script.on_configuration_changed(function(_event)
   scan_all_existing()
 end)
 
-script.on_event(defines.events.on_built_entity, on_built)
-script.on_event(defines.events.on_robot_built_entity, on_built)
-script.on_event(defines.events.script_raised_built, on_built)
-script.on_event(defines.events.script_raised_revive, on_built)
+script.on_event(defines.events.on_pre_player_mined_item,   on_pre_removed)
+script.on_event(defines.events.on_robot_pre_mined,         on_pre_removed)
+script.on_event(defines.events.on_space_platform_pre_mined, on_pre_removed)
 
-script.on_event(defines.events.on_player_mined_entity, on_removed)
-script.on_event(defines.events.on_robot_mined_entity, on_removed)
-script.on_event(defines.events.on_entity_died, on_removed)
-script.on_event(defines.events.script_raised_destroy, on_removed)
+script.on_event(defines.events.on_built_entity,       on_built)
+script.on_event(defines.events.on_robot_built_entity, on_built)
+script.on_event(defines.events.script_raised_built,   on_built)
+script.on_event(defines.events.script_raised_revive,  on_built)
+
+script.on_event(defines.events.on_player_mined_entity,        on_removed)
+script.on_event(defines.events.on_robot_mined_entity,         on_removed)
+script.on_event(defines.events.on_space_platform_mined_entity, on_removed)
+script.on_event(defines.events.on_entity_died,                on_removed)
+script.on_event(defines.events.script_raised_destroy,         on_removed)
 
 script.on_event(defines.events.on_player_rotated_entity, function(event)
   local ent = event.entity
@@ -4611,8 +4752,9 @@ script.on_nth_tick(2, tick_merge)
 
 -- on_pre_entity_settings_pasted fires when the player picks
 -- up settings from a source entity (Ctrl-C with the tool).
--- We use it to capture the panel state and play a sound so
+-- Use it to capture the panel state and play a sound so
 -- the player gets feedback, matching vanilla combinator feel.
+
 script.on_event(defines.events.on_pre_entity_settings_pasted, function(event)
   local player = game.get_player(event.player_index)
   if not (player and player.valid) then return end
@@ -4626,8 +4768,7 @@ script.on_event(defines.events.on_pre_entity_settings_pasted, function(event)
   player.play_sound{ path = "utility/copied" }
 end)
 
--- on_entity_settings_pasted fires when the player pastes
--- onto a destination entity (Ctrl-V with the tool).
+-- on_entity_settings_pasted fires when the player pastes onto a destination entity (Ctrl-V with the tool).
 script.on_event(defines.events.on_entity_settings_pasted, function(event)
   local player = game.get_player(event.player_index)
   if not (player and player.valid) then return end
@@ -4638,13 +4779,12 @@ script.on_event(defines.events.on_entity_settings_pasted, function(event)
   -- Both entities must be widescreen display panels.
   if not (is_panel(src) and is_panel(dst)) then return end
 
-  -- paste_panel with a live source rebuilds the clip from the
-  -- source entity, ensuring the freshest state is captured.
+  -- paste_panel with a live source rebuilds the clip from the source entity, ensuring the freshest state is captured. 
   paste_panel(player, src, dst)
 end)
 
 ------------------------------------------------------------
--- Remote interface for Signal Display
+-- Remote interface for DSC/Signal Display
 ------------------------------------------------------------
 
 remote.add_interface("WidescreenDisplayPanels", {

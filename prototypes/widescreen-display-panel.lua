@@ -102,10 +102,21 @@ local function make_panel_entity(spec)
   base.name = spec.name
   base.minable.result = spec.name
   base.corpse = spec.name .. "-remnants"
-  base.remains_when_mined = spec.name .. "-remnants"
+  base.remains_when_mined = nil
   base.collision_box = box_for_tiles(spec.tiles_w, spec.tiles_h, 0.05)
   base.selection_box = box_for_tiles(spec.tiles_w, spec.tiles_h, 0.00)
   base.rotatable = false
+
+  -- Prevent ghost rotation before placement.
+  local flags = base.flags or {}
+  local has_not_rotatable = false
+  for _, f in ipairs(flags) do
+    if f == "not-rotatable" then has_not_rotatable = true break end
+  end
+  if not has_not_rotatable then
+    flags[#flags + 1] = "not-rotatable"
+  end
+  base.flags = flags
 
   if not base.circuit_wire_max_distance or base.circuit_wire_max_distance <= 0 then
     base.circuit_wire_max_distance = 9
