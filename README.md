@@ -4,7 +4,7 @@
 
 Adds 2x1, 3x1, and 4x1 widescreen and tallscreen variants of the vanilla display panel, with built-in combinators. Designed for cleaner dashboards and improved readability/organisation in circuit network setups.
 
---
+---
 
 ## Features
 
