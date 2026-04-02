@@ -128,6 +128,6 @@ Segments and panels can be copied and pasted, including any smart logic configur
 
 ## Current Version
 
-[v1.2.1 - Wired Panel Patch](https://github.com/lyttelgeek/SpaceConnectionSignals/releases/tag/1.2.1-Wired_Panel_Patch)
+[v1.2.1 - Wired Ports Patch](https://github.com/lyttelgeek/SpaceConnectionSignals/releases/tag/1.2.1-Wired_Ports_Patch)
 
 ---
